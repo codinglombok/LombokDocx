@@ -1,0 +1,42 @@
+{
+  "name": "lombokdocx",
+  "version": "1.0.0",
+  "description": "LombokDocx — DOCX to HTML converter, extract text, images, tables, formatting",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "test": "vitest --run",
+    "lint": "tsc --noEmit",
+    "fuzz": "npm run build && tsx tests/fuzz/xmlparser.fuzz.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "vitest": "^2.0.0",
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "lombokfuzzer": "^0.1.0",
+    "tsx": "^4.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codinglombok/LombokDocx.git"
+  },
+  "homepage": "https://codinglombok.github.io/LombokDocx",
+  "bugs": {
+    "url": "https://github.com/codinglombok/LombokDocx/issues"
+  },
+  "author": "Lombok Digital <hello@codinglombok.dev>",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

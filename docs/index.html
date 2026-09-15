@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LombokDocx — Lombok Ecosystem</title>
+<meta name="description" content="DOCX → HTML content extractor — text, images, tables, and formatting, zero-dependency.">
+<style>
+  :root { --brand:#2e7d5b; --ink:#1a1a2e; --muted:#6b7280; --bg:#fafaf9; --card:#fff; --accent:#8b5cf6; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; margin:0; color:var(--ink); background:var(--bg); line-height:1.6; }
+  .hero { background:linear-gradient(135deg,var(--brand),#1f5a41); color:#fff; padding:5rem 1.5rem 4rem; text-align:center; }
+  .hero h1 { font-size:3rem; margin:0 0 .5rem; }
+  .hero p { font-size:1.25rem; opacity:.95; max-width:640px; margin:0 auto 1.5rem; }
+  .badges { display:flex; gap:.5rem; justify-content:center; flex-wrap:wrap; }
+  .badges img { height:22px; }
+  main { max-width:960px; margin:0 auto; padding:3rem 1.5rem; }
+  .install { background:var(--ink); color:#e5e7eb; padding:1.25rem 1.5rem; border-radius:12px; font-family:ui-monospace,monospace; font-size:1rem; overflow:auto; }
+  .features { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:1rem; margin:2.5rem 0; }
+  .feature { background:var(--card); border:1px solid #e5e7eb; border-radius:12px; padding:1.5rem; }
+  .feature h3 { margin:0 0 .5rem; color:var(--brand); font-size:1.1rem; }
+  .feature p { margin:0; color:var(--muted); font-size:.95rem; }
+  pre { background:var(--ink); color:#e5e7eb; padding:1.5rem; border-radius:12px; overflow:auto; }
+  code { font-family:ui-monospace,monospace; }
+  h2 { font-size:1.75rem; margin:2.5rem 0 1rem; }
+  .eco { background:var(--card); border:1px solid #e5e7eb; border-radius:12px; padding:2rem; margin-top:3rem; }
+  .eco a { color:var(--accent); font-weight:600; text-decoration:none; }
+  .eco-grid { display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1rem; }
+  .chip { background:#f3f4f6; border-radius:999px; padding:.35rem .9rem; font-size:.85rem; text-decoration:none; color:var(--ink); }
+  footer { text-align:center; padding:3rem 1.5rem; color:var(--muted); font-size:.9rem; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <h1>LombokDocx</h1>
+    <p>DOCX → HTML content extractor — text, images, tables, and formatting, zero-dependency.</p>
+    <div class="badges">
+      <img src="https://img.shields.io/npm/v/lombokdocx.svg?logo=npm" alt="npm">
+      <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="license">
+      <img src="https://img.shields.io/badge/Lombok-Ecosystem-2e7d5b?logo=github" alt="ecosystem">
+    </div>
+  </div>
+  <main>
+    <h2>Install</h2>
+    <div class="install">npm install lombokdocx</div>
+    <div class="features">
+      <div class="feature"><h3>DOCX unzip + parse</h3><p>Reads the OOXML ZIP structure natively.</p></div>
+      <div class="feature"><h3>Style preservation</h3><p>Fonts, colors, bold/italic, alignment.</p></div>
+      <div class="feature"><h3>Table extraction</h3><p>Convert Word tables to semantic HTML.</p></div>
+      <div class="feature"><h3>Image extraction</h3><p>Pull embedded images out of the archive.</p></div>
+      <div class="feature"><h3>Metadata</h3><p>Document core properties (title, author, dates).</p></div>
+      <div class="feature"><h3>HTML output</h3><p>Clean semantic HTML ready for PDF injection.</p></div>
+    </div>
+    <h2>Quick start</h2>
+    <pre><code>import { Docx } from 'lombokdocx'
+
+const docx = new Docx(docxBuffer)
+docx.extract()
+
+const html   = docx.getHTML()
+const images = docx.getImages()
+const tables = docx.getTables()
+const meta   = docx.getMetadata()</code></pre>
+    <div class="eco">
+      <h2 style="margin-top:0"> Part of the Lombok Ecosystem</h2>
+      <p>A modular suite of Apache-2.0 libraries for document processing, built for developers, researchers, and students.</p>
+      <div class="eco-grid">
+        <a class="chip" href="https://github.com/codinglombok/LombokPDF">LombokPDF</a>
+        <a class="chip" href="https://github.com/codinglombok/LombokCSS">LombokCSS</a>
+        <a class="chip" href="https://github.com/codinglombok/LombokCharts">LombokCharts</a>
+        <a class="chip" href="https://github.com/codinglombok/docflow">DocFlow</a>
+        <a class="chip" href="https://github.com/codinglombok/lombok-markdown">lombok-markdown</a>
+        <a class="chip" href="https://github.com/codinglombok/lombok-docx">lombok-docx</a>
+        <a class="chip" href="https://github.com/codinglombok/lombok-csv">lombok-csv</a>
+      </div>
+    </div>
+  </main>
+  <footer>
+    Apache License 2.0 · <a href="https://github.com/codinglombok">@codinglombok</a> · Crafted in Lombok, built for the world.
+  </footer>
+</body>
+</html>
