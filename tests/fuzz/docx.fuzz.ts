@@ -1,29 +1,18 @@
 /**
- * Fuzz test — LombokDocx XMLParser
+ * Fuzz test — LombokDocx XML parser and package reader
  *
- * Target: `new XMLParser(xml).parse()` — parser XML rekursif buatan sendiri
- * yang dipakai untuk baca WordprocessingML (document.xml) di dalam DOCX.
- * Ini target fuzz paling bernilai di paket ini karena:
- *   1. Rekursif tanpa batas kedalaman eksplisit → rawan stack overflow
- *      kalau dikasih tag bersarang sangat dalam.
- *   2. `elementToString()` + `indexOf()` di parseElement (lihat src/docx.ts)
- *      berpotensi O(n²) pada child banyak/berulang → rawan hang, makanya
- *      timeoutMs di bawah sengaja diset ketat.
- *   3. Regex tag/attribute buatan sendiri (bukan XML parser standar) →
- *      rawan salah tangani entity, CDATA, comment, atau namespace aneh.
- *
- * `DocxExtractor` TIDAK dipakai sebagai target karena baca dari filePath
- * (I/O) dan async — di luar cakupan harness in-process sinkron LombokFuzzer
- * v0.1.x. XMLParser adalah inti parsing yang sesungguhnya diuji di sini.
+ * Targets: `new XMLParser(xml).parse()` and `readDocx(bytes)` + `renderHTML`.
+ * Errors of type DocxError are the documented failure mode; any other
+ * exception, a hang, or a crash is a finding.
  *
  * Jalankan:
  *   npm run fuzz
  */
 import { LombokFuzzer, FuzzMode, HarnessMode, FuzzEvent } from 'lombokfuzzer'
-import { XMLParser } from '../../dist/index.js'
+import { XMLParser, DocxError, readDocx, renderHTML, DocxBuilder } from '../../dist/index.js'
 
 const fuzzer = new LombokFuzzer({
-  name: 'lombokdocx-xmlparser',
+  name: "lombokdocx",
   mode: FuzzMode.Mutation,
   maxExecutions: Number(process.env.FUZZ_EXECUTIONS ?? 50_000),
   maxInputSize: 64 * 1024,
@@ -31,8 +20,17 @@ const fuzzer = new LombokFuzzer({
   harness: {
     mode: HarnessMode.InProcess,
     targetFunction: (data: Uint8Array) => {
-      const xml = Buffer.from(data).toString('utf-8')
-      new XMLParser(xml).parse()
+      // Documented failures are DocxError with a code; anything else is a bug.
+      try {
+        new XMLParser(Buffer.from(data).toString('utf-8')).parse()
+      } catch (e) {
+        if (!(e instanceof DocxError)) throw e
+      }
+      try {
+        renderHTML(readDocx(data, { maxTotalSize: 8 * 1024 * 1024 }))
+      } catch (e) {
+        if (!(e instanceof DocxError)) throw e
+      }
     },
   },
 })
@@ -61,6 +59,15 @@ for (const depth of [50, 200, 1000]) {
 for (const s of seeds) {
   fuzzer.addSeed(new TextEncoder().encode(s))
 }
+// Whole .docx packages so mutations also exercise the ZIP reader and inflate.
+fuzzer.addSeed(
+  new DocxBuilder()
+    .setMetadata({ title: 'Seed' })
+    .addParagraph('Heading', { heading: 1 })
+    .addParagraph('Body text', { bold: true, align: 'center' })
+    .addTable([['a', 'b'], ['c', 'd']])
+    .toDocx(),
+)
 
 fuzzer.on(FuzzEvent.CrashFound, ({ crash }) => {
   console.error(
@@ -77,7 +84,7 @@ fuzzer.on(FuzzEvent.TimeoutFound, ({ input }) => {
 })
 
 async function main() {
-  console.log('Fuzzing LombokDocx XMLParser...\n')
+  console.log('Fuzzing LombokDocx...\n')
   const stats = await fuzzer.run()
 
   console.log(`\nExecutions   : ${stats.totalExecutions}`)

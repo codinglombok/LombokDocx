@@ -1,46 +1,22 @@
 # LombokDocx
 
-> DOCX → HTML content extractor — text, images, tables, and formatting, zero-dependency.
+> Read and write Word `.docx` files with zero dependencies: text, headings, lists, tables with merged cells, links, images, and metadata, with safe HTML output.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![npm version](https://img.shields.io/npm/v/lombokdocx.svg?logo=npm)](https://www.npmjs.com/package/lombokdocx)
-[![npm downloads](https://img.shields.io/npm/dm/lombokdocx.svg)](https://www.npmjs.com/package/lombokdocx)
-[![PyPI](https://img.shields.io/pypi/v/lombokdocx.svg?logo=pypi)](https://pypi.org/project/lombokdocx)
-[![Packagist](https://img.shields.io/packagist/v/codinglombok/lombokdocx.svg?logo=packagist)](https://packagist.org/packages/codinglombok/lombokdocx)
 [![CI](https://github.com/codinglombok/LombokDocx/actions/workflows/ci.yml/badge.svg)](https://github.com/codinglombok/LombokDocx/actions/workflows/ci.yml)
-[![jsDelivr](https://img.shields.io/jsdelivr/npm/hm/lombokdocx.svg)](https://www.jsdelivr.com/package/npm/lombokdocx)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript)](tsconfig.json)
 [![Lombok Ecosystem](https://img.shields.io/badge/Lombok-Ecosystem-2e7d5b?logo=github)](https://github.com/codinglombok)
 
----
+Part of the [Lombok Ecosystem](https://github.com/codinglombok).
 
-Extract content from DOCX files - convert to HTML, extract text, images, tables, and metadata.
+## Mengapa library ini? (Why this library?)
 
-## Features
+- Everything needed to open a `.docx` lives in the package: a ZIP reader, a DEFLATE decoder (RFC 1951), and an XML parser. No native modules and no runtime dependencies, so it runs in Node.js, Deno, Bun, browsers, and edge runtimes.
+- Built for untrusted uploads: DTDs are rejected, decompression is bounded (ZIP bombs stop early), XML depth is limited, and HTML output escapes all text, blocks `javascript:` links, and never inlines SVG.
+- Behaviour is specified in a normative [SPEC](docs/SPEC_LombokDocx_v1.1.0.md) and pinned by 163 shared vectors whose ZIP/DEFLATE expectations come from Python's `zlib` and `zipfile`, so future language ports can be proven identical.
+- It can also write simple `.docx` files (headings, formatted paragraphs, tables, metadata) with deterministic bytes.
 
-**Zero Dependencies**
-- Pure TypeScript implementation
-- ~12KB minified
-- Works in Node.js and browser
-
-**DOCX Support**
-- Extract text, paragraphs, formatting
-- Extract tables with cell data
-- Extract images and media
-- Read document metadata (title, author, created date)
-- Preserve formatting (bold, italic, colors)
-
-**Multiple Output Formats**
-- Convert to HTML
-- Extract plain text
-- Get structured document object
-- Build documents programmatically
-
-**Metadata Extraction**
-- Title, author, subject
-- Creation and modification dates
-- Word/character counts
-- Custom properties
+Typical uses: previewing uploads in a web app, indexing documents for search, generating letters and reports, and migrating Word content into a CMS.
 
 ## Installation
 
@@ -48,250 +24,76 @@ Extract content from DOCX files - convert to HTML, extract text, images, tables,
 npm install lombokdocx
 ```
 
-## Quick Start
+Not yet published to npm; until then install from GitHub with `npm install github:codinglombok/LombokDocx`.
 
-```typescript
-import { DocxExtractor, DocxBuilder } from 'lombokdocx'
+## Quick start
 
-// Extract from file
-const extractor = new DocxExtractor('./document.docx')
-const doc = await extractor.extract()
+```ts
+import { DocxExtractor, DocxBuilder, readDocx, renderHTML } from 'lombokdocx'
 
-// Or build programmatically
-const doc = new DocxBuilder()
-  .addParagraph('Hello World')
-  .addTable([
-    ['Name', 'Age'],
-    ['John', '30'],
-    ['Jane', '28']
-  ])
-  .setMetadata({ title: 'Employee Data' })
-  .build()
+// Node.js / Deno / Bun: from a path
+const ex = new DocxExtractor('./report.docx')
+const doc = await ex.extract()
+console.log(doc.metadata.title, doc.blocks.length)
+console.log(await ex.extractText())
+console.log(await ex.extractHTML())
 
-// Convert to HTML
-const html = new DocxBuilder()
-  .addParagraph('Sample')
-  .toHTML()
+// Any runtime: from bytes
+const html = renderHTML(readDocx(new Uint8Array(await file.arrayBuffer())))
+
+// Write a .docx
+const bytes = new DocxBuilder()
+  .setMetadata({ title: 'Meeting notes', author: 'Secretariat' })
+  .addParagraph('Meeting notes', { heading: 1 })
+  .addParagraph('Opened at 09:00.', { italic: true })
+  .addTable([['No', 'Decision'], ['1', 'Budget approved']])
+  .toDocx()
 ```
 
-## API Reference
+## What is read
 
-### `new DocxExtractor(filePath)`
+| Area | Supported |
+|---|---|
+| Text | paragraphs, runs, tabs, line breaks, non-breaking and soft hyphens, field results, tracked insertions (deletions dropped), content controls |
+| Formatting | bold, italic, underline, strike, colour, font size (direct formatting), paragraph alignment |
+| Structure | headings 1-9 (from style names, also localised style ids), bullet and numbered lists with nesting, tables with `gridSpan` / `vMerge`, nested tables, document order across paragraphs and tables |
+| Links and media | external hyperlinks and bookmark anchors, embedded images (DrawingML and VML) |
+| Metadata | title, subject, author, keywords, description, last modified by, created/modified dates, page/word/character counts |
+| Packages | stored and deflated ZIP entries with CRC-32 checks, transitional and strict OOXML namespaces, any namespace prefix, UTF-8 and UTF-16 parts |
 
-Extract content from a DOCX file.
+Errors are `DocxError` with a stable `code`: `INVALID_ZIP`, `UNSUPPORTED_ZIP`, `CORRUPT_DATA`, `LIMIT_EXCEEDED`, `INVALID_XML`, `MISSING_PART`.
 
-```typescript
-const extractor = new DocxExtractor('./document.docx')
-const doc = await extractor.extract()
+Full API: [docs/API_LombokDocx_v1.1.0.md](docs/API_LombokDocx_v1.1.0.md). Guide: [docs/guide_how_to_use_LombokDocx_v1.1.0.md](docs/guide_how_to_use_LombokDocx_v1.1.0.md).
 
-// Extract just text
-const text = await extractor.extractText()
+## Known limitations
 
-// Extract as HTML
-const html = await extractor.extractHTML()
-```
+Headers, footers, footnotes, comments, text boxes, and equations are not read; formatting inherited from character or paragraph styles is not applied (headings and list numbering are); ZIP64 and encrypted files are rejected; list numbers are not computed into the text; the whole file is held in memory. See [Known limitations](docs/full_summary_project_LombokDocx_v1.1.0.md#2-batasan-yang-diketahui).
 
-### `new DocxBuilder()`
+## Language ports
 
-Build documents programmatically.
+| Language | Status |
+|---|---|
+| TypeScript / JavaScript | Reference implementation, passes all 163 vectors |
+| Python, Go, PHP | Planned (stub README only, no code yet) |
 
-```typescript
-const doc = new DocxBuilder()
-  .addParagraph('Title', { align: 'center', bold: true })
-  .addParagraph('Content paragraph')
-  .addTable([['A', 'B'], ['C', 'D']])
-  .setMetadata({ title: 'My Doc', author: 'John' })
-  .build()
-```
+## Security
 
-### Methods
+Guarantees are normative in [SPEC section 8](docs/SPEC_LombokDocx_v1.1.0.md#8-keamanan-normatif). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-#### `addParagraph(text, formatting?)`
-
-Add a paragraph with optional formatting.
-
-```typescript
-builder.addParagraph('Bold text', { bold: true })
-builder.addParagraph('Centered', { align: 'center' })
-```
-
-#### `addTable(rows)`
-
-Add a table with row data.
-
-```typescript
-builder.addTable([
-  ['Header 1', 'Header 2'],
-  ['Row 1, Col 1', 'Row 1, Col 2'],
-  ['Row 2, Col 1', 'Row 2, Col 2']
-])
-```
-
-#### `setMetadata(metadata)`
-
-Set document metadata.
-
-```typescript
-builder.setMetadata({
-  title: 'Document Title',
-  author: 'John Doe',
-  subject: 'Test Subject',
-  created: new Date(),
-  keywords: ['test', 'sample']
-})
-```
-
-#### `build()`
-
-Get the built DocxDocument object.
-
-```typescript
-const doc = builder.build()
-```
-
-#### `toHTML()`
-
-Convert to HTML string.
-
-```typescript
-const html = builder.toHTML()
-```
-
-## Document Structure
-
-A DocxDocument contains:
-
-```typescript
-{
-  paragraphs: DocxParagraph[]    // All text paragraphs
-  tables: DocxTable[]             // All tables
-  images: DocxImage[]             // All embedded images
-  metadata: DocxMetadata          // Document metadata
-}
-```
-
-## Formatting Options
-
-Paragraphs support:
-
-```typescript
-{
-  bold?: boolean
-  italic?: boolean
-  underline?: boolean
-  fontSize?: number
-  color?: string
-  align?: 'left' | 'center' | 'right' | 'justify'
-}
-```
-
-## Examples
-
-### Extract Text
-
-```typescript
-const text = await new DocxExtractor('doc.docx').extractText()
-console.log(text)
-```
-
-### Build & Convert to HTML
-
-```typescript
-const html = new DocxBuilder()
-  .setMetadata({ title: 'Report' })
-  .addParagraph('Executive Summary')
-  .addParagraph('Key findings...')
-  .addTable([
-    ['Metric', 'Value'],
-    ['Growth', '15%'],
-    ['Profit', '$100K']
-  ])
-  .addParagraph('Recommendations')
-  .toHTML()
-
-console.log(html)
-```
-
-### Extract with Metadata
-
-```typescript
-const doc = await new DocxExtractor('doc.docx').extract()
-
-console.log('Title:', doc.metadata.title)
-console.log('Author:', doc.metadata.author)
-console.log('Created:', doc.metadata.created)
-console.log('Word Count:', doc.metadata.wordCount)
-```
-
-## Supported DOCX Features
-
- Paragraphs and text
- Bold, italic, underline formatting
- Text colors and highlighting
- Paragraph alignment
- Lists (ordered and unordered)
- Tables with merged cells
- Images and media
- Document properties/metadata
- Headers and footers (v1.0)
- Sections and page breaks (v1.0)
-
-## Browser Support
-
-- Node.js 18+
-- Deno
-- Modern browsers (ESM)
-
-## Performance
-
-- Extract 100 DOCX files: < 1s
-- Convert to HTML: < 10ms per document
-- Memory efficient streaming
-
-## Testing
+## Development
 
 ```bash
-npm test              # Run tests
-npm test -- --watch  # Watch mode
-npm run lint         # Type check
+npm ci
+npm run check   # lint, tests with coverage, build, standards check
+npm run fuzz    # fuzz the XML parser and package reader
 ```
 
-Test coverage: 85%+
+## Related libraries
 
-## Contributing
-
-Contributions welcome! See CONTRIBUTING.md
+- [LombokMarkDown](https://github.com/codinglombok/LombokMarkDown) — Markdown to HTML
+- [LombokCSV](https://github.com/codinglombok/LombokCSV) — CSV parsing and HTML tables
+- [LombokHTML](https://github.com/codinglombok/LombokHTML) — HTML parsing and sanitising
 
 ## License
 
-Apache 2.0 - See LICENSE
-
-## See Also
-
-- [LombokMarkDown](https://github.com/codinglombok/LombokMarkDown) - Markdown to HTML
-- [LombokCSV](https://github.com/codinglombok/LombokCSV) - CSV to HTML
-- [LombokPDF](https://github.com/codinglombok/lombokpdf) - PDF generation
-
-
-
-## Lombok Ecosystem
-
-This library is part of the **[Lombok Ecosystem](https://github.com/codinglombok)** — a modular suite of production-grade, Apache-2.0 libraries for document processing, PDF generation, and data visualization. Built for **developers, researchers, students, and the wider community**.
-
-[![Ecosystem](https://img.shields.io/badge/Lombok-Ecosystem-2e7d5b?logo=github)](https://github.com/codinglombok)
-[![Roadmap](https://img.shields.io/badge/Project-Roadmap-8b5cf6?logo=github)](https://github.com/orgs/codinglombok/projects)
-
-| Layer | Library | Purpose |
-|-------|---------|---------|
-| **Core** | [LombokPDF](https://github.com/codinglombok/LombokPDF) | PDF generation hub |
-| **Core** | [LombokCSS](https://github.com/codinglombok/LombokCSS) | Token-first CSS framework |
-| **Core** | [LombokFuzzer](https://github.com/codinglombok/LombokFuzzer) | Fuzzing test framework |
-| **Core** | [LombokCharts](https://github.com/codinglombok/LombokCharts) | Zero-dependency charts |
-| **Docs** | [LombokDocFlow](https://github.com/codinglombok/LombokDocFlow) | Universal import/export |
-| **Convert** | [LombokMarkDown](https://github.com/codinglombok/LombokMarkDown) | Markdown → HTML |
-| **Convert** | [LombokDocx](https://github.com/codinglombok/LombokDocx) | DOCX → HTML |
-| **Convert** | [LombokCSV](https://github.com/codinglombok/LombokCSV) | CSV → HTML tables |
-| **Meta** | [LombokJpegExif](https://github.com/codinglombok/LombokJpegExif) | JPEG EXIF metadata |
-
-> **New to the ecosystem?** Start at the [ecosystem overview](https://github.com/codinglombok) or the [DocFlow demo](https://github.com/codinglombok/LombokDocFlow).
-
+Apache-2.0. See [LICENSE](LICENSE).

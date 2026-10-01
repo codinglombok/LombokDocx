@@ -7,36 +7,70 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        node-version: ["18", "20", "22"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ["20", "22", "24"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm install
+      - run: npm ci
       - run: npm run lint
+      - run: npm run coverage
       - run: npm run build
-      - run: npm test
+
+  standards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Vector file matches SHA256SUMS
+        run: sha256sum -c vectors/SHA256SUMS
+      - name: lombok doctor
+        env:
+          LOMBOK_PRIVACY_TERMS: ${{ secrets.LOMBOK_PRIVACY_TERMS }}
+        run: bash scripts/lombok-doctor.sh LombokDocx
+      - run: npm run build
+      - run: npm pack --dry-run
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Fuzz XML parser and package reader
+        run: npm run fuzz
+        env:
+          FUZZ_EXECUTIONS: "100000"
 
   publish-npm:
-    needs: test
+    needs: [test, standards]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: https://registry.npmjs.org
-      - run: npm install
+      - name: Tag must equal package.json version
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != v$v"; exit 1; }
+      - run: npm ci
+      - run: npm test
       - run: npm run build
       - run: npm publish --provenance --access public
         env:

@@ -1,25 +1,65 @@
 {
   "name": "lombokdocx",
-  "version": "1.0.0",
-  "description": "LombokDocx — DOCX to HTML converter, extract text, images, tables, formatting",
+  "version": "1.1.0",
+  "description": "Read and write .docx files: text, headings, lists, tables with merged cells, links, images and metadata, with safe HTML output. Zero dependencies. Part of the Lombok Ecosystem.",
+  "keywords": [
+    "docx",
+    "word",
+    "ooxml",
+    "wordprocessingml",
+    "docx-to-html",
+    "zip",
+    "inflate",
+    "zero-dependency",
+    "lombok-ecosystem"
+  ],
   "license": "Apache-2.0",
+  "author": "codinglombok (https://github.com/codinglombok)",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "lint": "tsc --noEmit -p tsconfig.check.json",
     "test": "vitest --run",
-    "lint": "tsc --noEmit",
-    "fuzz": "npm run build && tsx tests/fuzz/xmlparser.fuzz.ts"
+    "coverage": "vitest --run --coverage",
+    "fuzz": "npm run build && tsx tests/fuzz/docx.fuzz.ts",
+    "vectors": "python3 vectors/build_vectors.py",
+    "doctor": "bash scripts/lombok-doctor.sh LombokDocx",
+    "check": "npm run lint && npm run coverage && npm run build && npm run doctor"
   },
   "dependencies": {},
   "devDependencies": {
-    "tsup": "^8.0.0",
-    "vitest": "^2.0.0",
-    "typescript": "^5.0.0",
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^5.0.3",
     "lombokfuzzer": "^0.1.0",
-    "tsx": "^4.19.0"
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
   },
   "repository": {
     "type": "git",
@@ -29,14 +69,8 @@
   "bugs": {
     "url": "https://github.com/codinglombok/LombokDocx/issues"
   },
-  "author": "Lombok Digital <hello@codinglombok.dev>",
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md",
-    "CHANGELOG.md"
-  ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   }
 }
