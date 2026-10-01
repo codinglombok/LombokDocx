@@ -1,255 +1,127 @@
-import { XMLElement, DocxDocument, DocxParagraph, DocxTable, DocxMetadata, DocxImage, DocxRun } from './types.js'
-import { createReadStream } from 'fs'
+/**
+ * LombokDocx - public API: extractor, builder/writer, XML parser.
+ */
+import { DocxError } from './errors.js'
+import { renderHTML, escapeHTML } from './render.js'
+import { documentToText, readDocx } from './wordml.js'
+import { parseXML } from './xml.js'
+import { writeZip } from './zip.js'
+import type {
+  DocxAlign, DocxDocument, DocxMetadata, DocxOptions, DocxParagraph, DocxRun, HTMLRenderOptions, XMLElement,
+} from './types.js'
 
 /**
- * Simple XML parser for DOCX extraction
+ * XML parser kept for compatibility with 1.0.0. Throws `DocxError('INVALID_XML')`
+ * for malformed input or a DTD (SPEC §3).
  */
 export class XMLParser {
-  private xml: string
+  constructor(private xml: string, private options: { maxDepth?: number } = {}) {}
 
-  constructor(xml: string) {
-    this.xml = xml
-  }
-
-  /**
-   * Parse XML string to element tree
-   */
   parse(): XMLElement {
-    const root = this.parseElement(this.xml, 0)
-    return root as XMLElement
-  }
-
-  private parseElement(xml: string, startPos: number): XMLElement | null {
-    const trimmed = xml.substring(startPos).trimStart()
-    if (!trimmed.startsWith('<')) return null
-
-    // Get tag name
-    const tagMatch = trimmed.match(/^<([a-zA-Z0-9:\-_]+)/)
-    if (!tagMatch) return null
-
-    const tagName = tagMatch[1]
-    const openTagEnd = trimmed.indexOf('>')
-
-    if (openTagEnd === -1) return null
-
-    // Parse attributes
-    const openTag = trimmed.substring(0, openTagEnd + 1)
-    const attrString = openTag.substring(tagName.length + 1, openTagEnd).trim()
-    const attributes = this.parseAttributes(attrString)
-
-    // Check for self-closing tag
-    if (openTag.endsWith('/>')) {
-      return {
-        name: tagName,
-        attributes,
-        children: []
-      }
-    }
-
-    // Find closing tag
-    const closeTagPattern = new RegExp(`</${tagName.split(':')[1] || tagName}>`, 'i')
-    const closeTagMatch = trimmed.substring(openTagEnd).match(closeTagPattern)
-
-    if (!closeTagMatch) {
-      return {
-        name: tagName,
-        attributes,
-        children: []
-      }
-    }
-
-    // Extract content between tags
-    const contentStart = openTagEnd + 1
-    const contentEnd = trimmed.indexOf(closeTagMatch[0])
-    const content = trimmed.substring(contentStart, contentEnd).trim()
-
-    // Parse children
-    const children: (XMLElement | string)[] = []
-    let pos = 0
-
-    while (pos < content.length) {
-      if (content[pos] === '<') {
-        const child = this.parseElement(content, pos)
-        if (child) {
-          children.push(child)
-          const childStr = this.elementToString(child)
-          pos += content.substring(pos).indexOf(childStr) + childStr.length
-        } else {
-          pos++
-        }
-      } else {
-        const textEnd = content.indexOf('<', pos)
-        const text = textEnd === -1 ? content.substring(pos) : content.substring(pos, textEnd)
-        if (text.trim()) {
-          children.push(text.trim())
-        }
-        pos = textEnd === -1 ? content.length : textEnd
-      }
-    }
-
-    return {
-      name: tagName,
-      attributes,
-      children,
-      text: content
-    }
-  }
-
-  private parseAttributes(attrString: string): Record<string, string> {
-    const attributes: Record<string, string> = {}
-    const attrRegex = /([a-zA-Z0-9:\-_]+)="([^"]*)"/g
-    let match
-
-    while ((match = attrRegex.exec(attrString)) !== null) {
-      attributes[match[1]] = match[2]
-    }
-
-    return attributes
-  }
-
-  private elementToString(elem: XMLElement): string {
-    const attrs = Object.entries(elem.attributes)
-      .map(([k, v]) => `${k}="${v}"`)
-      .join(' ')
-
-    const attrStr = attrs ? ` ${attrs}` : ''
-    return `<${elem.name}${attrStr}></${elem.name}>`
+    return parseXML(this.xml, this.options)
   }
 }
 
+export type DocxSource = string | Uint8Array | ArrayBuffer
+
+async function loadSource(source: DocxSource): Promise<Uint8Array> {
+  if (source instanceof Uint8Array) return source
+  if (source instanceof ArrayBuffer) return new Uint8Array(source)
+  const fs = await import('node:fs/promises')
+  return new Uint8Array(await fs.readFile(source))
+}
+
 /**
- * DOCX file extractor
- * Main class for working with DOCX files
+ * Reads a .docx file. `source` is a file path (Node.js, Deno, Bun) or the file bytes
+ * (any runtime).
  */
 export class DocxExtractor {
-  private filePath: string
+  private doc?: DocxDocument
 
-  constructor(filePath: string) {
-    this.filePath = filePath
-  }
+  constructor(private source: DocxSource, private options: DocxOptions = {}) {}
 
-  /**
-   * Extract content from DOCX file
-   */
   async extract(): Promise<DocxDocument> {
-    // Note: Full implementation requires unzip library
-    // For MVP, we parse XML directly
-
-    return {
-      paragraphs: [],
-      tables: [],
-      images: [],
-      metadata: {}
-    }
+    this.doc ??= readDocx(await loadSource(this.source), this.options)
+    return this.doc
   }
 
-  /**
-   * Extract text only (no formatting)
-   */
+  /** Block texts joined by LF; table cells by TAB (SPEC §6.1). */
   async extractText(): Promise<string> {
-    const doc = await this.extract()
-    return doc.paragraphs.map(p => p.text).join('\n')
+    return documentToText(await this.extract())
   }
 
-  /**
-   * Extract to HTML
-   */
-  async extractHTML(): Promise<string> {
-    const doc = await this.extract()
-    return this.renderHTML(doc)
-  }
-
-  private renderHTML(doc: DocxDocument): string {
-    const html: string[] = []
-
-    // Add metadata
-    if (doc.metadata.title) {
-      html.push(`<h1>${this.escape(doc.metadata.title)}</h1>`)
-    }
-
-    // Add paragraphs
-    for (const para of doc.paragraphs) {
-      html.push(this.renderParagraph(para))
-    }
-
-    // Add tables
-    for (const table of doc.tables) {
-      html.push(this.renderTable(table))
-    }
-
-    return html.join('')
-  }
-
-  private renderParagraph(para: DocxParagraph): string {
-    const formatting = para.formatting || {}
-    const align = formatting.align ? ` style="text-align: ${formatting.align}"` : ''
-
-    let content = ''
-    for (const run of para.runs) {
-      let runHtml = this.escape(run.text)
-
-      if (run.bold) runHtml = `<strong>${runHtml}</strong>`
-      if (run.italic) runHtml = `<em>${runHtml}</em>`
-      if (run.underline) runHtml = `<u>${runHtml}</u>`
-      if (run.color) runHtml = `<span style="color: ${run.color}">${runHtml}</span>`
-
-      content += runHtml
-    }
-
-    return `<p${align}>${content}</p>`
-  }
-
-  private renderTable(table: DocxTable): string {
-    let html = '<table>\n'
-
-    for (const row of table.rows) {
-      html += '<tr>\n'
-      for (const cell of row.cells) {
-        html += `<td>${this.escape(cell.text)}</td>\n`
-      }
-      html += '</tr>\n'
-    }
-
-    html += '</table>'
-    return html
-  }
-
-  private escape(text: string): string {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;')
+  async extractHTML(options?: HTMLRenderOptions): Promise<string> {
+    return renderHTML(await this.extract(), options)
   }
 }
 
+export interface BuilderParagraphOptions {
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  strike?: boolean
+  /** `#RRGGBB` */
+  color?: string
+  /** Points; written in half-points. */
+  fontSize?: number
+  align?: DocxAlign
+  /** Heading level 1-9 (written as style `Heading<n>`). */
+  heading?: number
+}
+
+function runFromOptions(text: string, f: BuilderParagraphOptions | undefined): DocxRun {
+  const run: DocxRun = { text }
+  if (!f) return run
+  if (f.bold) run.bold = true
+  if (f.italic) run.italic = true
+  if (f.underline) run.underline = true
+  if (f.strike) run.strike = true
+  if (f.color && /^#?[0-9a-fA-F]{6}$/.test(f.color)) run.color = `#${f.color.replace('#', '').toUpperCase()}`
+  if (f.fontSize !== undefined && f.fontSize > 0) run.fontSize = Math.round(f.fontSize * 2) / 2
+  return run
+}
+
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Characters not allowed in XML 1.0 are dropped when writing. */
+function xmlText(s: string): string {
+  return xmlEscape(s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]/g, ''))
+}
+
+const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+
 /**
- * In-memory DOCX document builder for testing
+ * Builds a document in memory and writes it as HTML or as a .docx file.
  */
 export class DocxBuilder {
-  private doc: DocxDocument = {
-    paragraphs: [],
-    tables: [],
-    images: [],
-    metadata: {}
-  }
+  private doc: DocxDocument = { paragraphs: [], tables: [], blocks: [], images: [], metadata: {} }
 
-  addParagraph(text: string, formatting?: any): this {
-    this.doc.paragraphs.push({
-      text,
-      formatting,
-      runs: [{ text }]
-    })
+  addParagraph(text: string, formatting?: BuilderParagraphOptions): this {
+    const para: DocxParagraph = { text, runs: text === '' ? [] : [runFromOptions(text, formatting)] }
+    if (formatting?.heading !== undefined && Number.isInteger(formatting.heading) && formatting.heading >= 1 && formatting.heading <= 9) {
+      para.style = `Heading${formatting.heading}`
+      para.heading = formatting.heading
+    }
+    if (formatting?.align) para.formatting = { align: formatting.align }
+    this.doc.paragraphs.push(para)
+    this.doc.blocks.push({ type: 'paragraph', paragraph: para })
     return this
   }
 
   addTable(rows: string[][]): this {
-    this.doc.tables.push({
+    const table = {
       rows: rows.map(row => ({
-        cells: row.map(cellText => ({ text: cellText }))
-      }))
-    })
+        cells: row.map(cellText => ({
+          text: cellText,
+          paragraphs: cellText.split('\n').map(t => ({ text: t, runs: t === '' ? [] : [{ text: t }] })),
+        })),
+      })),
+    }
+    this.doc.tables.push(table)
+    this.doc.blocks.push({ type: 'table', table })
     return this
   }
 
@@ -262,57 +134,110 @@ export class DocxBuilder {
     return this.doc
   }
 
-  toHTML(): string {
-    const html: string[] = []
-
-    if (this.doc.metadata.title) {
-      html.push(`<h1>${this.escape(this.doc.metadata.title)}</h1>`)
-    }
-
-    for (const para of this.doc.paragraphs) {
-      html.push(this.renderParagraph(para))
-    }
-
-    for (const table of this.doc.tables) {
-      html.push(this.renderTable(table))
-    }
-
-    return html.join('')
+  toHTML(options?: HTMLRenderOptions): string {
+    return renderHTML(this.doc, options)
   }
 
-  private renderParagraph(para: DocxParagraph): string {
-    const align = para.formatting?.align ? ` style="text-align: ${para.formatting.align}"` : ''
-    let content = ''
-
-    for (const run of para.runs) {
-      let text = this.escape(run.text)
-      if (run.bold) text = `<strong>${text}</strong>`
-      if (run.italic) text = `<em>${text}</em>`
-      content += text
-    }
-
-    return `<p${align}>${content}</p>`
+  toText(): string {
+    return documentToText(this.doc)
   }
 
-  private renderTable(table: DocxTable): string {
-    let html = '<table>\n'
-
-    for (const row of table.rows) {
-      html += '<tr>'
-      for (const cell of row.cells) {
-        html += `<td>${this.escape(cell.text)}</td>`
+  /** Writes a .docx package (stored ZIP, deterministic bytes; SPEC §8). */
+  toDocx(): Uint8Array {
+    const usedHeadings = new Set<number>()
+    const runXml = (r: DocxRun): string => {
+      const props: string[] = []
+      if (r.bold) props.push('<w:b/>')
+      if (r.italic) props.push('<w:i/>')
+      if (r.strike) props.push('<w:strike/>')
+      if (r.color) props.push(`<w:color w:val="${r.color.slice(1)}"/>`)
+      if (r.fontSize) props.push(`<w:sz w:val="${Math.round(r.fontSize * 2)}"/>`)
+      if (r.underline) props.push('<w:u w:val="single"/>')
+      const rPr = props.length ? `<w:rPr>${props.join('')}</w:rPr>` : ''
+      const parts = r.text.split(/(\t|\n)/).filter(s => s !== '')
+      const content = parts.map(s => (s === '\t' ? '<w:tab/>' : s === '\n' ? '<w:br/>' : `<w:t xml:space="preserve">${xmlText(s)}</w:t>`)).join('')
+      return `<w:r>${rPr}${content}</w:r>`
+    }
+    const paraXml = (p: DocxParagraph): string => {
+      const pPr: string[] = []
+      if (p.heading) {
+        usedHeadings.add(p.heading)
+        pPr.push(`<w:pStyle w:val="Heading${p.heading}"/>`)
       }
-      html += '</tr>\n'
+      const align = p.formatting?.align
+      if (align && align !== 'left') pPr.push(`<w:jc w:val="${align === 'justify' ? 'both' : align}"/>`)
+      return `<w:p>${pPr.length ? `<w:pPr>${pPr.join('')}</w:pPr>` : ''}${p.runs.map(runXml).join('')}</w:p>`
     }
+    let body = ''
+    let prevTable = false
+    for (const b of this.doc.blocks) {
+      // Two adjacent tables would merge into one; Word separates them with an empty paragraph.
+      if (b.type === 'table' && prevTable) body += '<w:p/>'
+      prevTable = b.type === 'table'
+      if (b.type === 'paragraph') {
+        body += paraXml(b.paragraph)
+        continue
+      }
+      const cols = Math.max(1, ...b.table.rows.map(r => r.cells.length))
+      body += '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid>'
+      body += '<w:gridCol/>'.repeat(cols) + '</w:tblGrid>'
+      for (const row of b.table.rows) {
+        body += '<w:tr>'
+        for (const cell of row.cells) {
+          const paras = cell.paragraphs?.length ? cell.paragraphs : [{ text: cell.text, runs: cell.text ? [{ text: cell.text }] : [] }]
+          body += `<w:tc>${paras.map(paraXml).join('')}</w:tc>`
+        }
+        body += '</w:tr>'
+      }
+      body += '</w:tbl>'
+    }
+    const document = `${XML_DECL}<w:document xmlns:w="${W_NS}"><w:body>${body}<w:sectPr/></w:body></w:document>`
+    const headingStyles = [...usedHeadings].sort((a, b) => a - b).map(n =>
+      `<w:style w:type="paragraph" w:styleId="Heading${n}"><w:name w:val="heading ${n}"/><w:basedOn w:val="Normal"/>` +
+      `<w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="${n - 1}"/></w:pPr>` +
+      `<w:rPr><w:b/><w:sz w:val="${Math.max(24, 36 - (n - 1) * 4)}"/></w:rPr></w:style>`).join('')
+    const styles = `${XML_DECL}<w:styles xmlns:w="${W_NS}"><w:style w:type="paragraph" w:default="1" w:styleId="Normal">` +
+      `<w:name w:val="Normal"/><w:qFormat/></w:style>${headingStyles}</w:styles>`
 
-    html += '</table>'
-    return html
-  }
+    const m = this.doc.metadata
+    const coreFields: string[] = []
+    if (m.title) coreFields.push(`<dc:title>${xmlText(m.title)}</dc:title>`)
+    if (m.subject) coreFields.push(`<dc:subject>${xmlText(m.subject)}</dc:subject>`)
+    if (m.author) coreFields.push(`<dc:creator>${xmlText(m.author)}</dc:creator>`)
+    if (m.keywords?.length) coreFields.push(`<cp:keywords>${xmlText(m.keywords.join(', '))}</cp:keywords>`)
+    if (m.description) coreFields.push(`<dc:description>${xmlText(m.description)}</dc:description>`)
+    if (m.lastModifiedBy) coreFields.push(`<cp:lastModifiedBy>${xmlText(m.lastModifiedBy)}</cp:lastModifiedBy>`)
+    const w3c = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, 'Z')
+    if (m.created && !Number.isNaN(m.created.getTime())) coreFields.push(`<dcterms:created xsi:type="dcterms:W3CDTF">${w3c(m.created)}</dcterms:created>`)
+    if (m.modified && !Number.isNaN(m.modified.getTime())) coreFields.push(`<dcterms:modified xsi:type="dcterms:W3CDTF">${w3c(m.modified)}</dcterms:modified>`)
+    const core = `${XML_DECL}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ` +
+      'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" ' +
+      `xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${coreFields.join('')}</cp:coreProperties>`
 
-  private escape(text: string): string {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
+    const contentTypes = `${XML_DECL}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+      '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
+      '</Types>'
+    const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    const pkgRels = `${XML_DECL}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="${R}/officeDocument" Target="word/document.xml"/>` +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
+      '</Relationships>'
+    const docRels = `${XML_DECL}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="${R}/styles" Target="styles.xml"/></Relationships>`
+
+    return writeZip([
+      { name: '[Content_Types].xml', data: contentTypes },
+      { name: '_rels/.rels', data: pkgRels },
+      { name: 'word/document.xml', data: document },
+      { name: 'word/_rels/document.xml.rels', data: docRels },
+      { name: 'word/styles.xml', data: styles },
+      { name: 'docProps/core.xml', data: core },
+    ])
   }
 }
+
+export { DocxError, escapeHTML }
