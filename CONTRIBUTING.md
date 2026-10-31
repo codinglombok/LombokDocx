@@ -24,9 +24,10 @@ npm run check
 
 1. Fork and create a feature branch (`git checkout -b feature/my-feature`)
 2. Behaviour changes start in the specification: update `docs/SPEC_LombokDocx_v<version>.md`,
-   add cases to `vectors/build_vectors.py` (hand-written expected values for XML/DOCX, Python zlib/zipfile for ZIP/DEFLATE), run `npm run vectors`,
+   add cases to `vectors/build_vectors.py` (hand-written expected values for XML/DOCX; ZIP/DEFLATE
+   streams from the deterministic pure-Python encoder, verified against zlib at generation time), run `npm run vectors`,
    and update `vectors/SHA256SUMS` and the hash in the SPEC
-3. Ensure `npm run check` passes (lint, tests with 90% coverage, build, `scripts/lombok-doctor.sh`)
+3. Ensure `npm run check` passes (lint, tests with coverage, build, `scripts/lombok-doctor.sh`)
 4. Update `CHANGELOG.md` under `[Unreleased]` (newest entries first)
 5. Open a PR against `main`
 
@@ -39,10 +40,14 @@ npm run check
 
 ## Adding a language port
 
-Ports live under `ports/{lang}/`. Each port must:
-- Implement the identical public API
-- Ship a runner that executes every case in `vectors/lombokdocx-vectors-v1.json`
+Ports live in their own root folder (`python/`, `go/`, `php/`; the TypeScript
+reference stays at the repository root). Each port must:
+- Implement the identical public API and the SPEC error codes
+- Ship a runner that executes every case in `vectors/lombokdocx-vectors-v1.json` with byte-identical results
 - Include its own README with install instructions
+
+CI picks the port up automatically: each language folder has a guarded job in
+`.github/workflows/ci.yml` that activates once code exists (`hashFiles`).
 
 ## License
 

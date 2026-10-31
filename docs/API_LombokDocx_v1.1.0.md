@@ -1,30 +1,30 @@
 # LombokDocx — API v1.1.0
 
-Referensi API publik paket npm `lombokdocx` 1.1.0. Perilaku normatif: [SPEC_](SPEC_LombokDocx_v1.1.0.md).
+Public API reference of the npm package `lombokdocx` 1.1.0. Normative behaviour: [SPEC_](SPEC_LombokDocx_v1.1.0.md).
 
-## 1. Membaca
+## 1. Reading
 
-| Ekspor | Tanda tangan | Catatan |
+| Export | Signature | Notes |
 |---|---|---|
-| `readDocx` | `(bytes: Uint8Array, options?: DocxOptions) => DocxDocument` | sinkron, semua runtime |
-| `DocxExtractor` | `new DocxExtractor(source: string \| Uint8Array \| ArrayBuffer, options?)` | `source` string = path berkas (Node.js/Deno/Bun) |
-| `DocxExtractor#extract()` | `Promise<DocxDocument>` | hasil di-cache per instance |
+| `readDocx` | `(bytes: Uint8Array, options?: DocxOptions) => DocxDocument` | synchronous, all runtimes |
+| `DocxExtractor` | `new DocxExtractor(source: string \| Uint8Array \| ArrayBuffer, options?)` | `source` string = file path (Node.js/Deno/Bun) |
+| `DocxExtractor#extract()` | `Promise<DocxDocument>` | result cached per instance |
 | `DocxExtractor#extractText()` | `Promise<string>` | SPEC §5 |
 | `DocxExtractor#extractHTML(options?)` | `Promise<string>` | SPEC §6 |
 | `documentToText` | `(doc) => string` | SPEC §5 |
 | `renderHTML` | `(doc, options?: HTMLRenderOptions) => string` | SPEC §6 |
 
-`DocxOptions`: `extractImages` (bawaan `true`), `extractMetadata` (`true`), `preserveFormatting` (`true`), `maxEntries` (10 000), `maxEntrySize` (100 MiB), `maxTotalSize` (256 MiB), `maxDepth` (256).
+`DocxOptions`: `extractImages` (default `true`), `extractMetadata` (`true`), `preserveFormatting` (`true`), `maxEntries` (10 000), `maxEntrySize` (100 MiB), `maxTotalSize` (256 MiB), `maxDepth` (256).
 
-`HTMLRenderOptions`: `includeTitle` (bawaan `true`), `embedImages` (`true`).
+`HTMLRenderOptions`: `includeTitle` (default `true`), `embedImages` (`true`).
 
-## 2. Model dokumen
+## 2. Document model
 
 ```ts
 interface DocxDocument {
-  paragraphs: DocxParagraph[]   // paragraf tingkat atas, urut dokumen
-  tables: DocxTable[]           // tabel tingkat atas, urut dokumen
-  blocks: DocxBlock[]           // paragraf dan tabel bercampur, urut dokumen (baru 1.1.0)
+  paragraphs: DocxParagraph[]   // top-level paragraphs, document order
+  tables: DocxTable[]           // top-level tables, document order
+  blocks: DocxBlock[]           // paragraphs and tables interleaved, document order (new in 1.1.0)
   images: DocxImage[]
   metadata: DocxMetadata
 }
@@ -47,31 +47,31 @@ interface DocxMetadata {
 }
 ```
 
-## 3. Menulis
+## 3. Writing
 
-| Ekspor | Catatan |
+| Export | Notes |
 |---|---|
-| `new DocxBuilder()` | pembangun dokumen di memori |
+| `new DocxBuilder()` | in-memory document builder |
 | `.addParagraph(text, options?)` | `options`: `bold`, `italic`, `underline`, `strike`, `color` (`#RRGGBB`), `fontSize` (pt), `align`, `heading` (1-9) |
-| `.addTable(rows: string[][])` | LF di sel menjadi paragraf terpisah |
-| `.setMetadata(partial)` | judul, penulis, kata kunci, tanggal, ... |
+| `.addTable(rows: string[][])` | LF inside a cell becomes separate paragraphs |
+| `.setMetadata(partial)` | title, author, keywords, dates, ... |
 | `.build()` | `DocxDocument` |
-| `.toHTML(options?)` / `.toText()` | renderer yang sama dengan pembacaan |
-| `.toDocx()` | `Uint8Array` berkas .docx (deterministik, SPEC §7) |
+| `.toHTML(options?)` / `.toText()` | same renderer as reading |
+| `.toDocx()` | `Uint8Array` .docx file (deterministic, SPEC §7) |
 
-## 4. Tingkat rendah
+## 4. Low level
 
-| Ekspor | Catatan |
+| Export | Notes |
 |---|---|
-| `parseXML(xml, { maxDepth })`, `XMLParser` | parser XML aman (SPEC §3); `XMLParser` dipertahankan dari 1.0.0 |
-| `textContent(el)`, `decodeXmlBytes(bytes)` | utilitas XML |
+| `parseXML(xml, { maxDepth })`, `XMLParser` | safe XML parser (SPEC §3); `XMLParser` kept from 1.0.0 |
+| `textContent(el)`, `decodeXmlBytes(bytes)` | XML utilities |
 | `ZipReader`, `writeZip`, `crc32` | ZIP (SPEC §2.2-§2.3) |
 | `inflateRaw(bytes, maxSize, expectedSize?)` | DEFLATE (SPEC §2.1) |
-| `escapeHTML`, `mergeRuns` | utilitas |
+| `escapeHTML`, `mergeRuns` | utilities |
 | `DocxError` (`code: DocxErrorCode`) | SPEC §1 |
 
-## 5. Kompatibilitas dengan 1.0.0
+## 5. Compatibility with 1.0.0
 
-Semua nama 1.0.0 tetap diekspor. Perubahan: `DocxImage.data` kini `Uint8Array` (sebelumnya `Buffer`, tidak pernah terisi), `DocxImage.base64` dihapus, `XMLElement.text` tidak lagi diisi, `XMLParser.parse()` melempar `DocxError` untuk XML rusak (sebelumnya mengembalikan pohon parsial), dan `DocxBuilder.toHTML()` kini merender format run dan memisahkan blok dengan LF.
+All 1.0.0 names remain exported. Changes: `DocxImage.data` is now a `Uint8Array` (was a never-populated `Buffer`), `DocxImage.base64` was removed, `XMLElement.text` is no longer set, `XMLParser.parse()` throws `DocxError` for malformed XML (previously returned a partial tree), and `DocxBuilder.toHTML()` now renders run formatting and separates blocks with LF.
 
-*Lisensi dokumen: Apache-2.0 · © codinglombok*
+*Document licence: Apache-2.0 · © codinglombok*

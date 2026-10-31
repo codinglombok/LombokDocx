@@ -5,6 +5,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/codinglombok/LombokDocx/actions/workflows/ci.yml/badge.svg)](https://github.com/codinglombok/LombokDocx/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript)](tsconfig.json)
+[![Vectors](https://img.shields.io/badge/shared%20vectors-163%20byte--exact-success)](vectors/)
 [![Lombok Ecosystem](https://img.shields.io/badge/Lombok-Ecosystem-2e7d5b?logo=github)](https://github.com/codinglombok)
 
 Part of the [Lombok Ecosystem](https://github.com/codinglombok).
@@ -13,18 +14,19 @@ Part of the [Lombok Ecosystem](https://github.com/codinglombok).
 
 - Everything needed to open a `.docx` lives in the package: a ZIP reader, a DEFLATE decoder (RFC 1951), and an XML parser. No native modules and no runtime dependencies, so it runs in Node.js, Deno, Bun, browsers, and edge runtimes.
 - Built for untrusted uploads: DTDs are rejected, decompression is bounded (ZIP bombs stop early), XML depth is limited, and HTML output escapes all text, blocks `javascript:` links, and never inlines SVG.
-- Behaviour is specified in a normative [SPEC](docs/SPEC_LombokDocx_v1.1.0.md) and pinned by 163 shared vectors whose ZIP/DEFLATE expectations come from Python's `zlib` and `zipfile`, so future language ports can be proven identical.
+- Behaviour is specified in a normative [SPEC](docs/SPEC_LombokDocx_v1.1.0.md) and pinned by 163 shared vectors whose DEFLATE streams come from a deterministic encoder verified against Python's `zlib`, so future language ports can be proven identical.
 - It can also write simple `.docx` files (headings, formatted paragraphs, tables, metadata) with deterministic bytes.
 
 Typical uses: previewing uploads in a web app, indexing documents for search, generating letters and reports, and migrating Word content into a CMS.
 
 ## Installation
 
-```bash
-npm install lombokdocx
-```
-
-Not yet published to npm; until then install from GitHub with `npm install github:codinglombok/LombokDocx`.
+| Language | Package | Status |
+|---|---|---|
+| TypeScript / JavaScript | `lombokdocx` (npm) | not yet published — install from GitHub meanwhile: `npm install github:codinglombok/LombokDocx` |
+| Python | `lombokdocx` (PyPI) | planned (stub, no code yet) |
+| Go | `github.com/codinglombok/lombokdocx/go` | planned (stub, no code yet) |
+| PHP | `codinglombok/lombokdocx` (Packagist) | planned (stub, no code yet) |
 
 ## Quick start
 
@@ -67,18 +69,20 @@ Full API: [docs/API_LombokDocx_v1.1.0.md](docs/API_LombokDocx_v1.1.0.md). Guide:
 
 ## Known limitations
 
-Headers, footers, footnotes, comments, text boxes, and equations are not read; formatting inherited from character or paragraph styles is not applied (headings and list numbering are); ZIP64 and encrypted files are rejected; list numbers are not computed into the text; the whole file is held in memory. See [Known limitations](docs/full_summary_project_LombokDocx_v1.1.0.md#2-batasan-yang-diketahui).
+Headers, footers, footnotes, comments, text boxes, and equations are not read; formatting inherited from character or paragraph styles is not applied (headings and list numbering are); ZIP64 and encrypted files are rejected; list numbers are not computed into the text; the whole file is held in memory. See [Known limitations](docs/full_summary_project_LombokDocx_v1.1.0.md#2-known-limitations).
 
 ## Language ports
 
 | Language | Status |
 |---|---|
-| TypeScript / JavaScript | Reference implementation, passes all 163 vectors |
-| Python, Go, PHP | Planned (stub README only, no code yet) |
+| TypeScript / JavaScript | Reference implementation (repository root), passes all 163 vectors |
+| Python, Go, PHP | Planned — stub folders `python/`, `go/`, `php/` with README only |
+
+Ports consume the same vector file and must reproduce byte-identical results (SPEC). Each port lands in its own root folder with its own CI job (guarded by `hashFiles` until code exists).
 
 ## Security
 
-Guarantees are normative in [SPEC section 8](docs/SPEC_LombokDocx_v1.1.0.md#8-keamanan-normatif). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+Guarantees are normative in [SPEC section 8](docs/SPEC_LombokDocx_v1.1.0.md#8-security-normative). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Development
 
@@ -87,6 +91,8 @@ npm ci
 npm run check   # lint, tests with coverage, build, standards check
 npm run fuzz    # fuzz the XML parser and package reader
 ```
+
+Releasing uses the ecosystem pattern: `scripts/bump_version.sh X.Y.Z` moves manifests and docs, a `v*` tag triggers `.github/workflows/release.yml` (npm publish plus GitHub Release), and `.github/workflows/release-npm.yml` rehearses a publish with `dry_run=true` first.
 
 ## Related libraries
 

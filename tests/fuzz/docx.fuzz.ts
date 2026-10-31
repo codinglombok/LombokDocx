@@ -5,7 +5,7 @@
  * Errors of type DocxError are the documented failure mode; any other
  * exception, a hang, or a crash is a finding.
  *
- * Jalankan:
+ * Run:
  *   npm run fuzz
  */
 import { LombokFuzzer, FuzzMode, HarnessMode, FuzzEvent } from 'lombokfuzzer'
@@ -16,7 +16,7 @@ const fuzzer = new LombokFuzzer({
   mode: FuzzMode.Mutation,
   maxExecutions: Number(process.env.FUZZ_EXECUTIONS ?? 50_000),
   maxInputSize: 64 * 1024,
-  timeoutMs: 1_000, // ketat — parser ini punya jalur O(n²) yang dicurigai
+  timeoutMs: 1_000, // strict — this parser has suspected O(n²) paths
   harness: {
     mode: HarnessMode.InProcess,
     targetFunction: (data: Uint8Array) => {
@@ -35,7 +35,7 @@ const fuzzer = new LombokFuzzer({
   },
 })
 
-// Seed corpus — potongan WordprocessingML nyata + kasus tepi XML.
+// Seed corpus — real WordprocessingML snippets plus XML edge cases.
 const seeds = [
   '<w:document><w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body></w:document>',
   '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p>',
@@ -49,7 +49,7 @@ const seeds = [
   '<a>text before <b>nested</b> text after</a>',
 ]
 
-// Tambahan: nested tag makin dalam untuk memicu jalur rekursif/stack
+// Additional deep nesting to trigger recursive/stack paths
 for (const depth of [50, 200, 1000]) {
   const open = '<a>'.repeat(depth)
   const close = '</a>'.repeat(depth)
@@ -80,7 +80,7 @@ fuzzer.on(FuzzEvent.CrashFound, ({ crash }) => {
 
 fuzzer.on(FuzzEvent.TimeoutFound, ({ input }) => {
   const preview = Buffer.from(input.data).toString('utf-8').slice(0, 200)
-  console.error(`[HANG] input yang bikin timeout: ${JSON.stringify(preview)}`)
+  console.error(`[HANG] input that caused the timeout: ${JSON.stringify(preview)}`)
 })
 
 async function main() {
@@ -94,13 +94,13 @@ async function main() {
   console.log(`Unique hangs   : ${stats.uniqueTimeouts}`)
 
   if (stats.uniqueCrashes > 0 || stats.uniqueTimeouts > 0) {
-    console.error('\nFuzzing menemukan crash/hang — lihat detail di atas dan folder ./crashes')
+    console.error('\nFuzzing found crashes/hangs — see the details above and the ./crashes folder')
     process.exit(1)
   }
-  console.log('\nTidak ada crash ditemukan.')
+  console.log('\nNo crashes found.')
 }
 
 main().catch((err) => {
-  console.error('Fuzz runner gagal:', err)
+  console.error('Fuzz runner failed:', err)
   process.exit(1)
 })

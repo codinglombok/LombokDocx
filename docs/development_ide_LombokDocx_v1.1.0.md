@@ -1,41 +1,41 @@
 # LombokDocx — Development IDE v1.1.0
 
-## 1. Lingkungan
+## 1. Environment
 
-| Alat | Versi |
+| Tool | Version |
 |---|---|
-| Node.js | 20 LTS atau lebih baru (CI: 20, 22, 24) |
+| Node.js | 20 LTS or newer (CI: 20, 22, 24) |
 | npm | 10+ |
-| Editor | VS Code atau IDE apa pun dengan dukungan TypeScript |
-| Python | 3.10+ (hanya untuk `vectors/build_vectors.py`; memakai zlib dan zipfile bawaan) |
-| Bash | untuk `scripts/lombok-doctor.sh` (Windows: Git Bash atau WSL) |
+| Editor | VS Code or any IDE with TypeScript support |
+| Python | 3.10+ (only for `vectors/build_vectors.py`; uses the standard library plus zlib for verification) |
+| Bash | for `scripts/lombok-doctor.sh` and `scripts/bump_version.sh` (Windows: Git Bash or WSL) |
 
-## 2. Perintah
+## 2. Commands
 
-| Perintah | Fungsi |
+| Command | Purpose |
 |---|---|
-| `npm ci` | pasang dependensi dev sesuai lockfile |
+| `npm ci` | install dev dependencies from the lockfile |
 | `npm run lint` | `tsc --noEmit` (strict) |
-| `npm test` | unit + runner vector |
-| `npm run coverage` | test dengan ambang coverage 90% |
-| `npm run build` | `tsup` ke `dist/` (ESM + CJS + d.ts) |
-| `npm run fuzz` | fuzz parser XML dan pembaca paket dengan lombokfuzzer (`FUZZ_EXECUTIONS` mengatur jumlah) |
-| `npm run vectors` | bangun ulang berkas vector dari `vectors/build_vectors.py` |
-| `npm run doctor` | pemeriksaan standar Lombok v3.6 |
+| `npm test` | unit + vector runner |
+| `npm run coverage` | tests with the coverage gate (95% statements / 90% branches) |
+| `npm run build` | `tsup` to `dist/` (ESM + CJS + d.ts) |
+| `npm run fuzz` | fuzz the XML parser and package reader with lombokfuzzer (`FUZZ_EXECUTIONS` controls the count) |
+| `npm run vectors` | rebuild the vector file from `vectors/build_vectors.py` |
+| `npm run doctor` | Lombok ecosystem standards check (v3.7 D-ENV) |
 | `npm run check` | lint + coverage + build + doctor |
 
-## 3. Alur mengubah perilaku
+## 3. Flow for changing behaviour
 
-1. Ubah SPEC lebih dulu.
-2. Tambah atau ubah kasus di `vectors/build_vectors.py`; nilai harapan XML/DOCX ditulis tangan dari SPEC, nilai harapan inflate/ZIP berasal dari Python zlib/zipfile, bukan dari keluaran kode. Berkas vector tidak dibangun ulang di CI karena byte terkompresi bergantung versi zlib.
-3. `npm run vectors`, lalu perbarui `vectors/SHA256SUMS` dan hash di SPEC.
-4. Ubah `src/` sampai `npm test` hijau.
-5. Catat di `CHANGELOG.md` (entri terbaru di depan).
+1. Change the SPEC first.
+2. Add or edit cases in `vectors/build_vectors.py`; XML/DOCX expected values are written by hand from the SPEC, inflate/ZIP expected values are the original inputs. The generator is deterministic: it regenerates bit-for-bit on any machine and verifies every stream against zlib at generation time (it aborts on mismatch).
+3. `npm run vectors`, then update `vectors/SHA256SUMS` and the hash in the SPEC.
+4. Change `src/` until `npm test` is green.
+5. Record it in `CHANGELOG.md` (newest entries first).
 
-## 4. Arah pengembangan
+## 4. Direction
 
-- Port Python sebagai pemeriksa referensi kedua (GP-11), lalu Go dan PHP.
-- Header, footer, catatan kaki, komentar; pewarisan format dari gaya.
-- Verifikasi silang otomatis di CI dengan berkas buatan python-docx dan LibreOffice.
+- Python port as a second reference checker (GP-11), then Go and PHP.
+- Headers, footers, footnotes, comments; format inheritance from styles.
+- Automated cross-checks in CI with files produced by python-docx and LibreOffice.
 
-*Lisensi dokumen: Apache-2.0 · © codinglombok*
+*Document licence: Apache-2.0 · © codinglombok*
