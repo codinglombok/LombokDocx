@@ -2,13 +2,18 @@
 """Builds vectors/lombokdocx-vectors-v1.json (GP-11).
 
 Oracles are independent of the TypeScript implementation:
-  * inflate / zip cases: compressed data and archives are produced by Python's
-    zlib and zipfile; expected bytes are the original input (size + SHA-256);
+  * inflate / zip cases: expected bytes are the original input (size + SHA-256);
   * xml / docx cases: expected trees, blocks, text and HTML are written by hand
     from SPEC_LombokDocx.
 
-Compressed bytes depend on the zlib build, so CI does not regenerate this file;
-it checks vectors/SHA256SUMS instead. After editing, run:
+The DEFLATE streams and archives are produced by the pure-Python deterministic
+encoder below, so this file regenerates bit-for-bit on any machine regardless
+of the installed zlib build. Every generated stream is verified against the
+system zlib at generation time (fail-closed), so zlib remains the reference
+implementation for the oracle while the committed bytes stay reproducible.
+
+CI regenerates this file and fails on any diff (git diff --exit-code) plus a
+SHA256SUMS check. After editing, run:
 
     python3 vectors/build_vectors.py
     sha256sum vectors/lombokdocx-vectors-v1.json > vectors/SHA256SUMS
@@ -17,12 +22,10 @@ and update the hash in docs/SPEC_LombokDocx_v<version>.md.
 """
 import base64
 import hashlib
-import io
 import json
 import pathlib
 import random
 import struct
-import zipfile
 import zlib
 
 cases = []
@@ -44,12 +47,344 @@ def digest(b):
     return {"size": len(b), "sha256": hashlib.sha256(b).hexdigest()}
 
 
-def deflate_raw(data, level=6, strategy=zlib.Z_DEFAULT_STRATEGY):
-    c = zlib.compressobj(level, zlib.DEFLATED, -15, 9, strategy)
-    return c.compress(data) + c.flush()
-
-
 rng = random.Random(20261001)
+
+
+# --- deterministic DEFLATE encoder (RFC 1951), pure Python -------------------
+# Modes are selected by the same knobs zlib used to take: level 0 writes stored
+# blocks, Z_FIXED / Z_HUFFMAN_ONLY / Z_RLE keep their zlib meanings, level 1
+# uses fixed Huffman codes, and the default (level 6/9) uses dynamic Huffman
+# codes with greedy matching.
+
+_LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
+_LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0]
+_DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577]
+_DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
+_CL_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+
+
+class _BitWriter:
+    def __init__(self):
+        self.out = bytearray()
+        self.acc = 0
+        self.n = 0
+
+    def bits(self, value, count):
+        """Writes `count` bits LSB-first (Huffman code lengths, extra bits)."""
+        self.acc |= (value & ((1 << count) - 1)) << self.n
+        self.n += count
+        while self.n >= 8:
+            self.out.append(self.acc & 0xFF)
+            self.acc >>= 8
+            self.n -= 8
+
+    def code(self, value, count):
+        """Writes a Huffman code MSB-first as RFC 1951 requires."""
+        rev = 0
+        for _ in range(count):
+            rev = (rev << 1) | (value & 1)
+            value >>= 1
+        self.bits(rev, count)
+
+    def align(self):
+        if self.n:
+            self.out.append(self.acc & 0xFF)
+            self.acc = 0
+            self.n = 0
+
+    def data(self):
+        return bytes(self.out)
+
+
+def _huffman_lengths(freqs, limit):
+    """Code lengths for the given frequencies, at most `limit` bits each."""
+    live = [(f, s) for s, f in enumerate(freqs) if f > 0]
+    lengths = [0] * len(freqs)
+    if not live:
+        return lengths
+    if len(live) == 1:
+        lengths[live[0][1]] = 1
+        return lengths
+    import heapq
+    heap = [(f, (s,), s) for f, s in live]
+    heapq.heapify(heap)
+    while len(heap) > 1:
+        f1, sy1, _ = heapq.heappop(heap)
+        f2, sy2, _ = heapq.heappop(heap)
+        for s in sy1 + sy2:
+            lengths[s] += 1
+        heapq.heappush(heap, (f1 + f2, sy1 + sy2, sy1[0]))
+    if max(lengths) > limit:
+        # Degenerate fallback: a flat complete code, shortest codes for the
+        # most frequent symbols. Used so rarely the ratio loss is irrelevant.
+        used = sorted((s for s, l in enumerate(lengths) if l), key=lambda s: (-freqs[s], s))
+        n = len(used)
+        k = max(1, (n - 1).bit_length())
+        m = (1 << k) - n
+        lengths = [0] * len(freqs)
+        for i, s in enumerate(used):
+            lengths[s] = k - 1 if i < m else k
+    return lengths
+
+
+def _canonical(lengths):
+    """Canonical codes from code lengths (RFC 1951 3.2.2)."""
+    maxlen = max(lengths)
+    bl = [0] * (maxlen + 2)
+    for l in lengths:
+        if l:
+            bl[l] += 1
+    next_code = [0] * (maxlen + 2)
+    code = 0
+    for l in range(1, maxlen + 1):
+        code = (code + bl[l - 1]) << 1
+        next_code[l] = code
+    out = {}
+    for s, l in enumerate(lengths):
+        if l:
+            out[s] = (next_code[l], l)
+            next_code[l] += 1
+    return out
+
+
+def _len_code(length):
+    for li in range(28, -1, -1):
+        if length >= _LEN_BASE[li]:
+            return li, length - _LEN_BASE[li]
+    raise ValueError(length)
+
+
+def _dist_code(distance):
+    for di in range(29, -1, -1):
+        if distance >= _DIST_BASE[di]:
+            return di, distance - _DIST_BASE[di]
+    raise ValueError(distance)
+
+
+def _fixed_tables():
+    global _FIXED
+    if _FIXED is None:
+        lit = {}
+        for s in range(144):
+            lit[s] = (0x30 + s, 8)
+        for s in range(144, 256):
+            lit[s] = (0x190 + s - 144, 9)
+        for s in range(256, 280):
+            lit[s] = (s - 256, 7)
+        for s in range(280, 286):
+            lit[s] = (0xC0 + s - 280, 8)
+        dist = {s: (s, 5) for s in range(30)}
+        _FIXED = (lit, dist)
+    return _FIXED
+
+
+_FIXED = None
+
+
+def _lz77(data, max_dist=32768, min_len=3):
+    """Greedy matcher: yields ints (literals) and (length, distance) tuples."""
+    n = len(data)
+    out = []
+    head = {}
+    i = 0
+    while i < n:
+        best_len = 0
+        best_dist = 0
+        if i + min_len <= n:
+            key = bytes(data[i:i + 3])
+            cands = head.get(key)
+            if cands:
+                lo = i - max_dist
+                maxl = min(258, n - i)
+                tried = 0
+                for j in reversed(cands):
+                    if j < lo:
+                        break
+                    l = 3
+                    while l < maxl and data[j + l] == data[i + l]:
+                        l += 1
+                    if l > best_len:
+                        best_len, best_dist = l, i - j
+                        if best_len == maxl:
+                            break
+                    tried += 1
+                    if tried >= 16:
+                        break
+        if best_len >= min_len:
+            out.append((best_len, best_dist))
+            end = min(n - 2, i + best_len)
+            for p in range(i, end):
+                k2 = bytes(data[p:p + 3])
+                c = head.get(k2)
+                if c is None:
+                    head[k2] = [p]
+                else:
+                    c.append(p)
+                    if len(c) > 64:
+                        del c[0]
+            i += best_len
+        else:
+            out.append(data[i])
+            if i + 3 <= n:
+                k2 = bytes(data[i:i + 3])
+                c = head.get(k2)
+                if c is None:
+                    head[k2] = [i]
+                else:
+                    c.append(i)
+            i += 1
+    return out
+
+
+def _write_tokens(w, toks, lit_tab, dist_tab):
+    for t in toks:
+        if isinstance(t, int):
+            c, n = lit_tab[t]
+            w.code(c, n)
+        else:
+            l, d = t
+            li, lextra = _len_code(l)
+            c, n = lit_tab[257 + li]
+            w.code(c, n)
+            if _LEN_EXTRA[li]:
+                w.bits(lextra, _LEN_EXTRA[li])
+            di, dextra = _dist_code(d)
+            c, n = dist_tab[di]
+            w.code(c, n)
+            if _DIST_EXTRA[di]:
+                w.bits(dextra, _DIST_EXTRA[di])
+    c, n = lit_tab[256]
+    w.code(c, n)
+
+
+def _write_dynamic(w, toks):
+    w.bits(2, 2)  # BTYPE=10, dynamic Huffman
+    lit = [0] * 286
+    dist = [0] * 30
+    for t in toks:
+        if isinstance(t, int):
+            lit[t] += 1
+        else:
+            l, d = t
+            li, _ = _len_code(l)
+            lit[257 + li] += 1
+            di, _ = _dist_code(d)
+            dist[di] += 1
+    lit[256] += 1
+    if sum(1 for f in lit if f) < 2:
+        return False  # degenerate tree; caller falls back to fixed Huffman
+    llen = _huffman_lengths(lit, 15)
+    dlen = _huffman_lengths(dist, 15)
+    if not any(dlen):
+        dlen[0] = 1  # non-empty distance tree with a single one-bit code
+    nlen = 286
+    while nlen > 257 and llen[nlen - 1] == 0:
+        nlen -= 1
+    ndist = 30
+    while ndist > 1 and dlen[ndist - 1] == 0:
+        ndist -= 1
+    seq = llen[:nlen] + dlen[:ndist]
+    rle = []
+    i = 0
+    while i < len(seq):
+        v = seq[i]
+        run = 1
+        while i + run < len(seq) and seq[i + run] == v:
+            run += 1
+        i += run
+        if v == 0:
+            while run >= 11:
+                r = min(run, 138)
+                rle.append((18, r - 11, 7))
+                run -= r
+            if run >= 3:
+                r = min(run, 10)
+                rle.append((17, r - 3, 3))
+                run -= r
+            while run:
+                rle.append((0, 0, 0))
+                run -= 1
+        else:
+            rle.append((v, 0, 0))
+            run -= 1
+            while run >= 3:
+                r = min(run, 6)
+                rle.append((16, r - 3, 2))
+                run -= r
+            while run:
+                rle.append((v, 0, 0))
+                run -= 1
+    cl = [0] * 19
+    for sym, _, _ in rle:
+        cl[sym] += 1
+    clen = _huffman_lengths(cl, 7)
+    hclen = 19
+    while hclen > 4 and clen[_CL_ORDER[hclen - 1]] == 0:
+        hclen -= 1
+    w.bits(nlen - 257, 5)
+    w.bits(ndist - 1, 5)
+    w.bits(hclen - 4, 4)
+    for k in range(hclen):
+        w.bits(clen[_CL_ORDER[k]], 3)
+    cl_canon = _canonical(clen)
+    for sym, extra, ebits in rle:
+        c, n = cl_canon[sym]
+        w.code(c, n)
+        if ebits:
+            w.bits(extra, ebits)
+    lit_tab = _canonical(llen)
+    dist_tab = _canonical(dlen)
+    _write_tokens(w, toks, lit_tab, dist_tab)
+    return True
+
+
+def deflate_raw(data, level=6, strategy=zlib.Z_DEFAULT_STRATEGY):
+    """Deterministic raw DEFLATE stream for `data` (RFC 1951)."""
+    if level == 0:
+        w = _BitWriter()
+        chunks = [data[i:i + 65535] for i in range(0, len(data), 65535)] or [b""]
+        for idx, ch in enumerate(chunks):
+            w.align()
+            w.bits(1 if idx == len(chunks) - 1 else 0, 1)
+            w.bits(0, 2)
+            w.align()
+            w.out += struct.pack("<HH", len(ch), ~len(ch) & 0xFFFF)
+            w.out += ch
+        stream = w.data()
+    else:
+        w = _BitWriter()
+        w.bits(1, 1)  # BFINAL, single block
+        if strategy == zlib.Z_HUFFMAN_ONLY:
+            w.bits(1, 2)
+            lit_tab, dist_tab = _fixed_tables()
+            _write_tokens(w, list(data), lit_tab, dist_tab)
+            w.align()
+            stream = w.data()
+        else:
+            max_dist = 1 if strategy == zlib.Z_RLE else 32768
+            toks = _lz77(data, max_dist=max_dist)
+            mode = "dynamic" if strategy not in (zlib.Z_FIXED,) and level not in (1,) else "fixed"
+            done = False
+            if mode == "dynamic":
+                done = _write_dynamic(w, toks)
+            if not done:
+                # fixed Huffman block (also the degenerate-tree fallback)
+                w2 = _BitWriter()
+                w2.bits(1, 1)
+                w2.bits(1, 2)
+                lit_tab, dist_tab = _fixed_tables()
+                _write_tokens(w2, toks, lit_tab, dist_tab)
+                w2.align()
+                stream = w2.data()
+            else:
+                w.align()
+                stream = w.data()
+    # fail-closed: zlib must decode every stream we commit
+    check = zlib.decompressobj(-15)
+    out = check.decompress(stream) + check.flush()
+    if out != data:
+        raise SystemExit(f"deterministic deflate verification failed ({len(data)} bytes)")
+    return stream
 
 # --- §2.1 inflate(input_b64) -> {size, sha256} -----------------------------
 samples = [
@@ -114,58 +449,63 @@ add("inflate", {"error": "LIMIT_EXCEEDED"}, input=b64(deflate_raw(b"\x00" * 5000
 
 
 # --- §2.2 zip(input_b64) -> {entries, read} ---------------------------------
-def make_zip(files, method=zipfile.ZIP_DEFLATED, **kw):
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", method, **kw) as z:
-        for name, data in files:
-            info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
-            info.compress_type = method
-            z.writestr(info, data)
-    return buf.getvalue()
+_ZIP_DATE = (2026, 1, 1, 0, 0, 0)  # fixed timestamp; readers never inspect it
+
+
+def make_zip(files, method=8, comment=b""):
+    """Deterministic ZIP writer: fixed date, UTF-8 flag, no extra fields."""
+    t = (_ZIP_DATE[3] << 11) | (_ZIP_DATE[4] << 5) | (_ZIP_DATE[5] // 2)
+    d = ((_ZIP_DATE[0] - 1980) << 9) | (_ZIP_DATE[1] << 5) | _ZIP_DATE[2]
+    out = bytearray()
+    central = bytearray()
+    offset = 0
+    for name, data in files:
+        nb = name.encode("utf-8")
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        crc = zlib.crc32(data) & 0xFFFFFFFF
+        if method == 8 and len(data) > 0:
+            comp, m = deflate_raw(data), 8
+        else:
+            comp, m = data, 0
+        local = struct.pack("<IHHHHHIIIHH", 0x04034b50, 20, 0x0800, m, t, d, crc, len(comp), len(data), len(nb), 0) + nb
+        out += local + comp
+        central += struct.pack("<IHHHHHHIIIHHHHHII", 0x02014b50, 20, 20, 0x0800, m, t, d, crc, len(comp), len(data),
+                               len(nb), 0, 0, 0, 0, 0, offset) + nb
+        offset += len(local) + len(comp)
+    eocd = struct.pack("<IHHHHIIH", 0x06054b50, 0, 0, len(files), len(files), len(central), offset, len(comment))
+    return bytes(out + central + eocd + comment)
 
 
 z_files = [("a.txt", b"alpha"), ("dir/b.bin", bytes(range(256))), ("empty", b"")]
 add("zip", {"entries": ["a.txt", "dir/b.bin", "empty"], "read": {n: digest(d) for n, d in z_files}},
     input=b64(make_zip(z_files)))
 add("zip", {"entries": ["a.txt", "dir/b.bin", "empty"], "read": {n: digest(d) for n, d in z_files}},
-    input=b64(make_zip(z_files, zipfile.ZIP_STORED)), note="stored")
+    input=b64(make_zip(z_files, 0)), note="stored")
 big = b"Lombok " * 20000
 add("zip", {"entries": ["big.txt"], "read": {"big.txt": digest(big)}}, input=b64(make_zip([("big.txt", big)])))
 uni = [("ñame/日本.xml", "<a>é</a>".encode())]
 add("zip", {"entries": ["ñame/日本.xml"], "read": {"ñame/日本.xml": digest(uni[0][1])}}, input=b64(make_zip(uni)))
 add("zip", {"entries": ["x"], "read": {"x": digest(b"1"), "missing": None}}, input=b64(make_zip([("x", b"1")])))
-buf = io.BytesIO()
-with zipfile.ZipFile(buf, "w") as z:
-    z.comment = b"archive comment"
-    z.writestr(zipfile.ZipInfo("c.txt", (2026, 1, 1, 0, 0, 0)), b"commented")
-add("zip", {"entries": ["c.txt"], "read": {"c.txt": digest(b"commented")}}, input=b64(buf.getvalue()), note="EOCD comment")
-buf = io.BytesIO()
-with zipfile.ZipFile(buf, "w") as z:
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        z.writestr(zipfile.ZipInfo("d", (2026, 1, 1, 0, 0, 0)), b"first")
-        z.writestr(zipfile.ZipInfo("d", (2026, 1, 1, 0, 0, 0)), b"second")
-add("zip", {"entries": ["d", "d"], "read": {"d": digest(b"first")}}, input=b64(buf.getvalue()), note="duplicate name: first wins")
+add("zip", {"entries": ["c.txt"], "read": {"c.txt": digest(b"commented")}}, input=b64(make_zip([("c.txt", b"commented")], 0, b"archive comment")), note="EOCD comment")
+add("zip", {"entries": ["d", "d"], "read": {"d": digest(b"first")}},
+    input=b64(make_zip([("d", b"first"), ("d", b"second")], 0)), note="duplicate name: first wins")
 add("zip", {"error": "INVALID_ZIP"}, input=b64(b"not a zip file at all, just text"), call="open")
 add("zip", {"error": "INVALID_ZIP"}, input=b64(b"PK"), call="open")
-z1 = bytearray(make_zip([("a", b"payload data")], zipfile.ZIP_STORED))
+z1 = bytearray(make_zip([("a", b"payload data")], 0))
 z1[30 + 1 + 3] ^= 0xFF  # flip a data byte -> CRC mismatch
 add("zip", {"error": "CORRUPT_DATA"}, input=b64(bytes(z1)), call="read", name="a")
-z2 = bytearray(make_zip([("a", b"payload")], zipfile.ZIP_STORED))
+z2 = bytearray(make_zip([("a", b"payload")], 0))
 cd = z2.rfind(b"PK\x01\x02")
 z2[cd + 8] |= 1
 z2[6] |= 1
 add("zip", {"error": "UNSUPPORTED_ZIP"}, input=b64(bytes(z2)), call="read", name="a", note="encryption flag")
-z3 = bytearray(make_zip([("a", b"payload")], zipfile.ZIP_STORED))
+z3 = bytearray(make_zip([("a", b"payload")], 0))
 cd = z3.rfind(b"PK\x01\x02")
 z3[cd + 10] = 12  # bzip2
 z3[8] = 12
 add("zip", {"error": "UNSUPPORTED_ZIP"}, input=b64(bytes(z3)), call="read", name="a", note="method 12")
-buf = io.BytesIO()
-with zipfile.ZipFile(buf, "w", allowZip64=True) as z:
-    z.writestr(zipfile.ZipInfo("a", (2026, 1, 1, 0, 0, 0)), b"x")
-z64 = bytearray(buf.getvalue())
+z64 = bytearray(make_zip([("a", b"x")]))
 e = z64.rfind(b"PK\x05\x06")
 z64[e + 16:e + 20] = b"\xff\xff\xff\xff"
 add("zip", {"error": "UNSUPPORTED_ZIP"}, input=b64(bytes(z64)), call="open", note="ZIP64 marker")
@@ -175,7 +515,7 @@ add("zip", {"error": "LIMIT_EXCEEDED"}, input=b64(make_zip([("a", b"1"), ("b", b
     limits={"maxEntries": 2})
 add("zip", {"error": "LIMIT_EXCEEDED"}, input=b64(make_zip([("a", b"x" * 600), ("b", b"y" * 600)])), call="read",
     name="b", limits={"maxTotalSize": 1000}, readFirst="a")
-z4 = bytearray(make_zip([("a", b"declared size lies")], zipfile.ZIP_DEFLATED))
+z4 = bytearray(make_zip([("a", b"declared size lies")], 8))
 cd = z4.rfind(b"PK\x01\x02")
 struct.pack_into("<I", z4, cd + 24, 5)
 add("zip", {"error": "CORRUPT_DATA"}, input=b64(bytes(z4)), call="read", name="a", note="size field too small")
@@ -274,11 +614,7 @@ def package(body, styles=None, numbering=None, doc_rels=(), core=None, app=None,
         files.append(("docProps/app.xml", f'{DECL}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">{app}</Properties>'))
     for name, data in (media or {}).items():
         files.append((name, data))
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for name, data in files:
-            z.writestr(zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0)), data)
-    return buf.getvalue()
+    return make_zip(files, 8)
 
 
 def R(text, **kw):

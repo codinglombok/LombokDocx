@@ -1,33 +1,33 @@
 # LombokDocx — Map v1.1.0
 
-## 1. Posisi di ekosistem
+## 1. Position in the ecosystem
 
 ```
-Cluster 03 Format, Parser & Serialisasi · tingkat L0 (tanpa dependensi Lombok wajib)
+Cluster 03 Format, Parser & Serialisation · level L0 (no mandatory Lombok dependencies)
 
 L0  LombokDocx
-     dependensi wajib    : (tidak ada)
-     dependensi opsional : (tidak ada saat ini; kandidat: LombokCompress untuk DEFLATE, LombokLocale untuk pesan)
-     dependensi dev      : lombokfuzzer
+     mandatory dependencies : (none)
+     optional dependencies  : (none today; candidates: LombokCompress for DEFLATE, LombokLocale for messages)
+     dev dependencies       : lombokfuzzer
 ```
 
-Inflate dan ZIP diimplementasikan sendiri agar library tetap L0. Bila LombokCompress kelak menyediakan dekoder DEFLATE dengan vector yang sama, LombokDocx dapat memakainya sebagai dependensi opsional tanpa mengubah perilaku.
+Inflate and ZIP are implemented in-house to keep the library L0. When LombokCompress later offers a DEFLATE decoder with the same vectors, LombokDocx can take it as an optional dependency without changing behaviour.
 
-## 2. Contoh pemakai di ekosistem
+## 2. Example consumers in the ecosystem
 
-| Pemakai | Pemakaian |
+| Consumer | Use |
 |---|---|
-| LombokPDF (aplikasi) | impor DOCX ke PDF |
-| LombokRAGFrameworks (aplikasi) | loader DOCX |
-| LombokDocFlow SDK | adaptor DOCX |
+| LombokPDF (application) | DOCX import to PDF |
+| LombokRAGFrameworks (application) | DOCX loader |
+| LombokDocFlow SDK | DOCX adapter |
 
-## 3. Fitur x port
+## 3. Features x ports
 
-| Fitur | TypeScript | Python | Go | PHP |
+| Feature | TypeScript | Python | Go | PHP |
 |---|---|---|---|---|
-| inflate, ZIP | YA (lulus vector) | stub | stub | stub |
-| XML | YA (lulus vector) | stub | stub | stub |
-| WordprocessingML, teks, HTML | YA (lulus vector) | stub | stub | stub |
-| Penulis DOCX | YA (test round-trip, diverifikasi python-docx) | stub | stub | stub |
+| inflate, ZIP | YES (passes vectors) | stub | stub | stub |
+| XML | YES (passes vectors) | stub | stub | stub |
+| WordprocessingML, text, HTML | YES (passes vectors) | stub | stub | stub |
+| DOCX writer | YES (round-trip tests, verified with python-docx) | stub | stub | stub |
 
-*Lisensi dokumen: Apache-2.0 · © codinglombok*
+*Document licence: Apache-2.0 · © codinglombok*

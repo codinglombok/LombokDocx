@@ -1,27 +1,27 @@
 # LombokDocx — Guide How to Use v1.1.0
 
-## 1. Pemasangan
+## 1. Installation
 
 ```bash
 npm install lombokdocx
 ```
 
-Belum terbit di npm saat dokumen ini ditulis; sementara: `npm install github:codinglombok/LombokDocx`.
+Not yet published to npm while this document is written; meanwhile: `npm install github:codinglombok/LombokDocx`.
 
-## 2. Membaca DOCX
+## 2. Reading DOCX
 
 ```ts
 import { DocxExtractor } from 'lombokdocx'
 
-const ex = new DocxExtractor('./laporan.docx')
+const ex = new DocxExtractor('./report.docx')
 const doc = await ex.extract()
-doc.metadata.title        // judul dari docProps/core.xml
-doc.blocks                // paragraf dan tabel sesuai urutan dokumen
-await ex.extractText()    // teks polos
-await ex.extractHTML()    // fragmen HTML aman
+doc.metadata.title        // title from docProps/core.xml
+doc.blocks                // paragraphs and tables in document order
+await ex.extractText()    // plain text
+await ex.extractHTML()    // safe HTML fragment
 ```
 
-Di browser atau edge, berikan byte berkas:
+In a browser or at the edge, pass the file bytes:
 
 ```ts
 import { readDocx, renderHTML } from 'lombokdocx'
@@ -29,9 +29,9 @@ const bytes = new Uint8Array(await file.arrayBuffer())
 const html = renderHTML(readDocx(bytes), { includeTitle: false })
 ```
 
-## 3. Berkas tak tepercaya
+## 3. Untrusted files
 
-Batas bawaan menghentikan bom ZIP dan XML yang sangat dalam. Perketat untuk layanan unggahan:
+The default limits stop ZIP bombs and deeply nested XML. Tighten them for upload services:
 
 ```ts
 import { readDocx, DocxError } from 'lombokdocx'
@@ -42,33 +42,33 @@ try {
 }
 ```
 
-## 4. Membuat DOCX
+## 4. Creating DOCX
 
 ```ts
 import { DocxBuilder } from 'lombokdocx'
 import { writeFileSync } from 'node:fs'
 
 const bytes = new DocxBuilder()
-  .setMetadata({ title: 'Notulen Rapat', author: 'Sekretariat' })
-  .addParagraph('Notulen Rapat', { heading: 1 })
-  .addParagraph('Rapat dibuka pukul 09.00.', { align: 'justify' })
-  .addTable([['No', 'Keputusan'], ['1', 'Anggaran disetujui']])
+  .setMetadata({ title: 'Meeting notes', author: 'Secretariat' })
+  .addParagraph('Meeting notes', { heading: 1 })
+  .addParagraph('The meeting opened at 09:00.', { align: 'justify' })
+  .addTable([['No', 'Decision'], ['1', 'Budget approved']])
   .toDocx()
-writeFileSync('notulen.docx', bytes)
+writeFileSync('notes.docx', bytes)
 ```
 
-## 5. Skenario pemakaian
+## 5. Use-case scenarios
 
-| Skenario | Contoh |
+| Scenario | Example |
 |---|---|
-| Pratinjau unggahan | tampilkan isi DOCX di aplikasi web tanpa konversi di server |
-| Pengindeksan dan pencarian | ambil teks dan metadata untuk mesin pencari internal |
-| Pembuatan dokumen otomatis | surat, laporan, notulen dari data aplikasi |
-| Migrasi konten | pindahkan dokumen Word ke CMS sebagai HTML bersih |
-| Perangkat edge | baca DOCX di gateway tanpa dependensi native |
+| Upload previews | show DOCX content in a web app without a server-side conversion step |
+| Indexing and search | extract text and metadata for an internal search engine |
+| Automated document generation | letters, reports, minutes from application data |
+| Content migration | move Word documents into a CMS as clean HTML |
+| Edge devices | read DOCX at a gateway with no native dependencies |
 
-## 6. Batasan
+## 6. Limitations
 
-Lihat [full_summary_](full_summary_project_LombokDocx_v1.1.0.md) bagian "Batasan yang Diketahui".
+See [full_summary_](full_summary_project_LombokDocx_v1.1.0.md), section "Known limitations".
 
-*Lisensi dokumen: Apache-2.0 · © codinglombok*
+*Document licence: Apache-2.0 · © codinglombok*

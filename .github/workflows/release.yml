@@ -1,0 +1,129 @@
+# Release — publishes npm on a v* tag after the version gate passes
+# (LombokVector pattern). The pypi and go-tag jobs stay declared (guarded by
+# hashFiles) so they are green-skipped until their ports land. PHP reaches
+# Packagist through the tag auto-sync once its composer.json (root) exists;
+# no Docker image is declared for this repository.
+name: Release
+
+permissions:
+  contents: read
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Tag matches the manifest, changelog, docs and doctor
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          grep -q "\"version\": \"$v\"" package.json
+          grep -q "^## \[$v\]" CHANGELOG.md
+          test -f "docs/SPEC_LombokDocx_v$v.md"
+          for f in docs/*_LombokDocx_v*.md; do
+            case "$f" in
+              *_v"$v".md) ;;
+              *) echo "stale versioned document committed: $f"; exit 1 ;;
+            esac
+          done
+          bash scripts/lombok-doctor.sh LombokDocx
+
+  npm:
+    needs: check-version
+    environment: npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  pypi:
+    needs: check-version
+    if: ${{ hashFiles('python/**/*.py') != '' }}
+    environment: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install pytest build
+      - run: python -m pytest -q
+        working-directory: python
+      - run: python -m build
+        working-directory: python
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: python/dist
+
+  go-tag:
+    # Go modules are versioned with git tags; subdirectory modules need the
+    # extra go/v<version> tag. Idempotent: skipped when the tag already exists.
+    needs: check-version
+    if: ${{ hashFiles('go/go.mod') != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Push the go/v* module tag (skip when it already exists)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="go/v${VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "tag ${TAG} already exists; skipping"
+            exit 0
+          fi
+          git tag -a "${TAG}" -m "LombokDocx Go module v${VERSION} (github.com/codinglombok/lombokdocx/go)"
+          git push origin "${TAG}"
+
+  github-release:
+    # Creates the GitHub Release with a checksummed source bundle. The bundle
+    # is built with git archive, so it contains tracked files only (internal
+    # documents stay out, ADR-024). Runs when go-tag succeeded or was skipped.
+    needs: [check-version, go-tag]
+    if: ${{ !cancelled() && needs.check-version.result == 'success' && (needs.go-tag.result == 'success' || needs.go-tag.result == 'skipped') }}
+    environment: github-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build the public source bundle (tracked files only)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format=zip --prefix="LombokDocx_${VERSION}/" \
+            -o "${RUNNER_TEMP}/LombokDocx_${VERSION}_bundle.zip" HEAD
+          cd "${RUNNER_TEMP}"
+          sha256sum "LombokDocx_${VERSION}_bundle.zip" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Create the GitHub Release and upload artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "LombokDocx ${VERSION}" \
+            --generate-notes \
+            "${RUNNER_TEMP}/LombokDocx_${VERSION}_bundle.zip" \
+            "${RUNNER_TEMP}/SHA256SUMS"

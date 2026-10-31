@@ -1,21 +1,21 @@
-# LombokDocx — Bahasa & i18n v1.1.0
+# LombokDocx — Language & i18n v1.1.0
 
-| Atribut | Nilai |
+| Attribute | Value |
 |---|---|
-| Tingkat i18n (masterplan §13) | **E** — kode error dan dokumentasi |
-| Katalog pesan | belum ada `locales/`; ID dicadangkan di §2 |
-| Cakupan katalog saat ini | en + id (2/20); Nusantara 0/6 |
+| i18n level (masterplan §13) | **E** — error codes and documentation |
+| Message catalogue | no `locales/` yet; IDs reserved in §2 |
+| Current catalogue coverage | en + id (2/20); Nusantara 0/6 |
 
-## 1. Prinsip
+## 1. Principles
 
-1. Error membawa `code` stabil (SPEC §1); program MUST memeriksa `code`.
-2. Teks dokumen dalam aksara apa pun (Latin, Arab, CJK, aksara Nusantara, emoji) dipertahankan tanpa normalisasi. Part XML UTF-8 dan UTF-16 didukung.
-3. Nama gaya heading dikenali dari nama gaya bawaan Word (`heading 1` ... `heading 9`), sehingga dokumen dengan id gaya terlokalisasi (misalnya `Judul1`) tetap terbaca sebagai heading selama part styles ada.
-4. Arah teks (RTL) dari `w:bidi`/`w:rtl` belum dibaca; keluaran HTML tidak menetapkan `dir`.
+1. Errors carry a stable `code` (SPEC §1); programs MUST check `code`.
+2. Document text in any script (Latin, Arabic, CJK, Nusantara scripts, emoji) is preserved without normalisation. UTF-8 and UTF-16 XML parts are supported.
+3. Heading style names are recognised from Word's built-in style names (`heading 1` ... `heading 9`), so documents with localised style ids (for example `Judul1`) still read as headings as long as the styles part exists.
+4. Text direction (RTL) from `w:bidi`/`w:rtl` is not read yet; the HTML output does not set `dir`.
 
-## 2. Katalog ID pesan (dicadangkan)
+## 2. Reserved message IDs
 
-| ID | Kode | en | id |
+| ID | Code | en | id |
 |---|---|---|---|
 | `lombokdocx.zip.invalid` | `INVALID_ZIP` | The file is not a valid ZIP archive. | Berkas bukan arsip ZIP yang sah. |
 | `lombokdocx.zip.unsupported` | `UNSUPPORTED_ZIP` | Unsupported ZIP feature: {$feature}. | Fitur ZIP tidak didukung: {$feature}. |
@@ -24,8 +24,8 @@
 | `lombokdocx.xml.invalid` | `INVALID_XML` | Invalid XML in {$part}. | XML tidak sah di {$part}. |
 | `lombokdocx.part.missing` | `MISSING_PART` | Required part is missing: {$part}. | Part wajib tidak ada: {$part}. |
 
-## 3. Rencana
+## 3. Plan
 
-Katalog `locales/en` dan `locales/id` (dimuat lewat LombokLocale sebagai dependensi opsional), serta arah teks `dir="rtl"` untuk paragraf `w:bidi`.
+A `locales/en` and `locales/id` catalogue (loaded through LombokLocale as an optional dependency), plus `dir="rtl"` for `w:bidi` paragraphs.
 
-*Lisensi dokumen: Apache-2.0 · © codinglombok*
+*Document licence: Apache-2.0 · © codinglombok*

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# lombok doctor (v3.6) - pemeriksaan mesin untuk standar Lombok Ecosystem.
+# lombok doctor (v3.7, varian D-ENV) - pemeriksaan mesin untuk standar Lombok Ecosystem.
 #
-# Mencakup (PRINSIP_UNIVERSAL v3.6, MASTERPLAN_UTAMA v3.6 §5, RILIS_DISTRIBUSI §5):
+# Mencakup (PRINSIP_UNIVERSAL v3.6, MASTERPLAN_UTAMA v3.6 §5, RILIS_DISTRIBUSI §5,
+# Masterplan v3.6 -> v3.7 R1-R4):
 #   docs     10 dokumen publik ada, versi nama berkas = versi manifest, SPEC normatif,
 #            hash vector cocok, jumlah kasus vector >= 100, runner vector per port
 #   claims   larangan klaim kepemilikan aplikasi/framework (ADR-019, U1)
@@ -11,6 +12,9 @@
 #            atau ~/.lombok/client-terms.txt; dilewati bila daftar tidak tersedia
 #   meta     LICENSE, SPDX manifest, README "Mengapa library ini", CHANGELOG terbaru = versi,
 #            tanpa dependensi path/file: lokal
+#   d-env    D-ENV-1 environment pada tiap job registry-publish (R1, dua arah dgn R3),
+#            D-ENV-2 nama environment kanonik (R2), D-ENV-3 composer.json root utk
+#            repo ber-port PHP
 #
 # Pemakaian: scripts/lombok-doctor.sh <RepoName> [--internal]
 #   --internal  wajibkan juga dokumen internal (masterplan_, architecture_) ada secara lokal
@@ -58,6 +62,16 @@ done
 for c in composer.json php/composer.json; do
   [ -f "$c" ] && grep -q '"version"' "$c" && err "$c memuat field version (Packagist mengambil versi dari tag)"
 done
+# manifest PHP harus tunggal di root (Packagist hanya membaca composer.json root)
+[ -f php/composer.json ] && err "php/composer.json masih ada - manifest PHP sudah pindah ke root composer.json"
+# dokumen versi lain tidak boleh ikut ter-commit (relapse: salinan *_v<versi-lama>.md hidup kembali)
+for f in docs/*_${REPO}_v*.md; do
+  [ -e "$f" ] || continue
+  case "$f" in
+    *_v${VER}.md) ;;
+    *) err "dokumen versi lain ter-commit: $f (harus *_v${VER}.md)" ;;
+  esac
+done
 
 # ---------------------------------------------------------------- docs
 PUBLIC="changelog map structure_repo full_summary_project guide_how_to_use how_to_dist development_ide API Lang SPEC"
@@ -88,7 +102,7 @@ if [ -f "$SPEC" ]; then
   if [ -f "$VEC" ]; then
     ACTUAL="$(sha256sum "$VEC" | cut -d' ' -f1)"
     grep -q "$ACTUAL" "$SPEC" || err "SHA-256 vector di SPEC tidak cocok dengan $VEC (aktual $ACTUAL)"
-    n="$(grep -o '"fn"' "$VEC" | wc -l)"
+    n="$(grep -o '"id": *"' "$VEC" | wc -l)"
     [ "$n" -ge 100 ] || err "berkas vector hanya $n kasus (<100, GP-11)"
     echo "vector: $n kasus"
   else
@@ -103,7 +117,7 @@ if [ -f typescript/package.json ]; then has_runner "typescript/test*/*vectors*" 
 if [ -f rust/Cargo.toml ]; then has_runner "rust/tests/*vectors*" || has_runner "rust/*/tests/*vectors*" || has_runner "rust/*-vectors" || err "runner vector Rust tidak ada"; fi
 if [ -f python/pyproject.toml ]; then has_runner "python/tests/*vectors*" || err "runner vector Python tidak ada"; fi
 if [ -f go/go.mod ]; then has_runner "go/*vectors*_test.go" || err "runner vector Go tidak ada"; fi
-if [ -f php/composer.json ]; then has_runner "php/tests/*ectors*" || err "runner vector PHP tidak ada"; fi
+if [ -d php/src ]; then has_runner "php/tests/*ectors*" || err "runner vector PHP tidak ada"; fi
 
 # ---------------------------------------------------------------- claims (ADR-019)
 APPS='RAG[A-Za-z]*|Clarion|DocFlow|PDF|AgenticAuto|Miner|DNSProxy|Proxy'
@@ -172,4 +186,89 @@ for m in rust/Cargo.toml $(ls rust/*/Cargo.toml 2>/dev/null); do
   [ -f "$m" ] && grep -E '^[a-z].*path *= *"\.\./\.\.' "$m" >/dev/null && err "$m memakai dependensi path ke repo lain"
 done
 
-[ $fail -eq 0 ] && echo "OK: lombok doctor lulus" || { echo "lombok doctor GAGAL"; exit 1; }
+# ---------------------------------------------------------------- D-ENV (v3.7, R1-R4)
+# D-ENV-1  setiap job registry-publish WAJIB mendeklarasikan `environment:` di
+#          level job (R1); job selain registry-publish DILARANG punya
+#          environment (R3).
+# D-ENV-2  nama environment harus kanonik (R2).
+# Klasifikasi registry-publish (dual-pattern ekosistem):
+#   (a) id/nama job memuat publish|mirror|gpr|packagist  -> pola publish_*.yml
+#       dan release-github.yml (LombokEncryptDecrypt);
+#   (b) id job = nama kanonik registry pada file release*.yml -> pola
+#       release.yml SimHash/Vector/Locale (crates, npm, pypi, docker,
+#       github-release).
+# Job otomasi non-upload sengaja DI LUAR R1: release-please, go-tag,
+# check-version - semuanya bukan unggah registry; environment di situ hanya
+# membanjiri tab Deployments dengan record no-op.
+CANON_RE='^(npm|pypi|crates|packagist|docker|github-release|maven|nuget|cpan|pgxn)$'
+PUBLISH_RE='publish|mirror|gpr|packagist'
+if [ ! -d .github/workflows ]; then
+  err "D-ENV-1: .github/workflows tidak ditemukan"
+else
+  shopt -s nullglob
+  found=0
+  for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
+    [ -f "$wf" ] || continue
+    case "$wf" in */release*.yml|*/release*.yaml) relfile=1 ;; *) relfile=0 ;; esac
+    # job-level key = indent 2 persis di bawah `jobs:`; isi job = indent >= 4.
+    # Keluaran per job: <job-id>\001<environment>\001<name>
+    # (delimiter \001 = SOH, bukan tab: tab adalah IFS whitespace sehingga
+    # field kosong akan tergabung dan field bergeser - bug yang sudah pernah
+    # terjadi. \001 tidak pernah muncul di teks YAML.)
+    records="$(awk '
+      /^[[:space:]]*#/ { next }
+      /^jobs:/ { inj=1; next }
+      inj && /^[^ #]/ { inj=0 }
+      inj && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+        if (job != "") print job "\001" envv "\001" jname
+        job=$0; sub(/^  /,"",job); sub(/:[[:space:]]*$/,"",job)
+        envv=""; jname=""
+        next
+      }
+      inj && job != "" {
+        if (jname == "" && /^    name:/) { jname=$0; sub(/^ *name:[[:space:]]*/,"",jname) }
+        if (/^    environment:/) { envv=$0; sub(/^ *environment:[[:space:]]*/,"",envv) }
+      }
+      END { if (job != "") print job "\001" envv "\001" jname }
+    ' "$wf")"
+    [ -z "$records" ] && continue
+    while IFS=$'\001' read -r job envv jname; do
+      [ -n "$job" ] || continue
+      envv="$(printf '%s' "$envv" | tr -d '"')"
+      label="${jname:-$job}"
+      if printf '%s %s' "$job" "$jname" | grep -qiE "$PUBLISH_RE" \
+         || { [ "$relfile" -eq 1 ] && printf '%s' "$job" | grep -qE "$CANON_RE"; }; then
+        found=$((found+1))
+        if [ -z "$envv" ]; then
+          err "D-ENV-1: $wf :: $job ('$label') adalah job registry-publish tanpa environment: (R1)"
+        elif printf '%s' "$envv" | grep -qE "$CANON_RE"; then
+          ok "D-ENV: $wf :: $job -> environment: $envv"
+        else
+          err "D-ENV-2: $wf :: $job environment '$envv' bukan nama kanonik (R2)"
+        fi
+      else
+        if [ -n "$envv" ]; then
+          err "D-ENV-1/R3: $wf :: $job ('$label') bukan job publish tetapi punya environment: $envv"
+        fi
+      fi
+    done <<< "$records"
+  done
+  if [ "$found" -gt 0 ]; then
+    echo "job registry-publish terdeteksi: $found"
+  else
+    err "D-ENV-1: tidak ada job registry-publish terdeteksi (klasifikasi salah?)"
+  fi
+fi
+
+# ---------------------------------------------------------------- D-ENV-3
+if [ -d ports/php ] || [ -d php/src ]; then
+  if [ -f composer.json ]; then
+    ok "D-ENV-3: port PHP terdeteksi dan composer.json root ada"
+  else
+    err "D-ENV-3: repo ber-port PHP tetapi composer.json root tidak ada"
+  fi
+else
+  echo "skip: D-ENV-3 (bukan repo ber-port PHP)"
+fi
+
+[ $fail -eq 0 ] && echo "OK: lombok doctor (v3.7 D-ENV) lulus" || { echo "lombok doctor GAGAL"; exit 1; }
